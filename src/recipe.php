@@ -1,0 +1,44 @@
+<?php
+
+namespace Deployer;
+
+require __DIR__ . '/helpers.php';
+require __DIR__ . '/tasks/env.php';
+require __DIR__ . '/tasks/npm.php';
+require __DIR__ . '/tasks/services.php';
+require __DIR__ . '/provision/firewall.php';
+require __DIR__ . '/provision/php.php';
+require __DIR__ . '/provision/composer.php';
+require __DIR__ . '/provision/node.php';
+require __DIR__ . '/provision/postgres.php';
+require __DIR__ . '/provision/redis.php';
+require __DIR__ . '/provision/caddy.php';
+
+set('php_version', '8.4');
+set('node_version', '22');
+set('db_username', 'deployer');
+
+desc('Run all provisioning tasks (new server setup)');
+task('provision:all', [
+    'provision:firewall',
+    'provision:php',
+    'provision:composer',
+    'provision:node',
+    'provision:redis',
+    'provision:postgres',
+    'provision:caddy',
+]);
+
+desc('Provision application stack without web server');
+task('provision:stack', [
+    'provision:php',
+    'provision:composer',
+    'provision:node',
+    'provision:redis',
+    'provision:postgres',
+]);
+
+before('deploy:shared', 'deploy:env');
+after('deploy:vendors', 'npm:install');
+after('npm:install', 'npm:build');
+after('deploy:symlink', 'php-fpm:restart');

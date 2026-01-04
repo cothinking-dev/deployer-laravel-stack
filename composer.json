@@ -1,0 +1,38 @@
+{
+  "name": "cothinking-dev/deployer-laravel-stack",
+  "description": "Deployer recipe for Laravel applications with PostgreSQL, Redis, and Caddy on Ubuntu",
+  "type": "library",
+  "license": "MIT",
+  "keywords": [
+    "deployer",
+    "laravel",
+    "postgresql",
+    "redis",
+    "caddy",
+    "deployment"
+  ],
+  "authors": [
+    {
+      "name": "Cothinking Dev",
+      "email": "dev@cothinking.com"
+    }
+  ],
+  "require": {
+    "php": "^8.2",
+    "deployer/deployer": "^7.0"
+  },
+  "autoload": {
+    "files": [
+      "src/helpers.php"
+    ]
+  },
+  "extra": {
+    "deployer": {
+      "recipes": [
+        "src/recipe.php"
+      ]
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
