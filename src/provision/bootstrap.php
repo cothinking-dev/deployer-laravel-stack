@@ -26,7 +26,6 @@ set('sudo_allowed_commands', [
     '/usr/bin/systemctl restart postgresql',
     '/usr/bin/systemctl reload postgresql',
     '/usr/bin/systemctl status postgresql',
-    '/usr/bin/sudo -u postgres *',
 
     // Redis management
     '/usr/bin/systemctl restart redis-server',
@@ -132,6 +131,13 @@ task('provision:bootstrap', function () {
     foreach ($sudoCommands as $command) {
         $sudoersContent .= "{$user} ALL=(ALL) NOPASSWD: {$command}\n";
     }
+
+    // PostgreSQL: allow running psql as postgres user
+    $sudoersContent .= "\n# PostgreSQL commands (run as postgres user)\n";
+    $sudoersContent .= "{$user} ALL=(postgres) NOPASSWD: /usr/bin/psql *\n";
+    $sudoersContent .= "{$user} ALL=(postgres) NOPASSWD: /usr/bin/psql\n";
+    $sudoersContent .= "{$user} ALL=(postgres) NOPASSWD: /usr/bin/createdb *\n";
+    $sudoersContent .= "{$user} ALL=(postgres) NOPASSWD: /usr/bin/dropdb *\n";
 
     // Write sudoers file
     $escapedContent = escapeshellarg($sudoersContent);
