@@ -49,9 +49,10 @@ task('deploy:fix-permissions', function () {
     run('chmod 755 $HOME');
 });
 
-desc('Setup server from scratch (bootstrap + add deploy key)');
+desc('Setup server from scratch (bootstrap + generate project deploy key + add to GitHub)');
 task('setup:server', [
     'provision:bootstrap',
+    'github:generate-key',
     'github:deploy-key',
 ])->oncePerNode();
 
