@@ -52,6 +52,7 @@ set('sudo_allowed_commands', [
     '/bin/mkdir *',
     '/bin/mv /tmp/* /etc/caddy/*',
     '/bin/mv /tmp/* /etc/fail2ban/*',
+    '/bin/mv * /usr/local/bin/*',
     '/usr/bin/touch /var/log/caddy/*',
     '/usr/bin/tee *',
 
