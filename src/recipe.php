@@ -39,7 +39,14 @@ task('provision:stack', [
     'provision:postgres',
 ]);
 
+// Ensure home directory is traversable by web servers
+desc('Ensure home directory is traversable');
+task('deploy:fix-permissions', function () {
+    run('chmod 755 $HOME');
+});
+
 before('deploy:shared', 'deploy:env');
+before('deploy:symlink', 'deploy:fix-permissions');
 after('deploy:vendors', 'npm:install');
 after('npm:install', 'npm:build');
 after('deploy:symlink', 'php-fpm:restart');

@@ -21,6 +21,9 @@ task('provision:bootstrap', function () {
     run("echo '{$user}:%secret%' | chpasswd", secret: $sudoPass);
     run("usermod -aG sudo {$user}");
 
+    // Make home directory traversable by web servers (Caddy, PHP-FPM)
+    run("chmod 755 /home/{$user}");
+
     info("Setting up SSH access...");
 
     run("mkdir -p /home/{$user}/.ssh");

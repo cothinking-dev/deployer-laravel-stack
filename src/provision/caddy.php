@@ -42,6 +42,8 @@ task('caddy:configure', function () {
     $domain = get('domain');
     $deployPath = get('deploy_path');
     $phpVersion = get('php_version', '8.4');
+    // tls_mode: 'auto' (Let's Encrypt), 'internal' (self-signed, for Cloudflare proxy), or custom cert path
+    $tlsMode = get('tls_mode', 'auto');
 
     if (! $domain) {
         throw new \RuntimeException('domain option is required for Caddy configuration');
@@ -51,10 +53,20 @@ task('caddy:configure', function () {
     $fullPath = str_replace('~', $homePath, $deployPath);
     $safeDomain = str_replace('.', '-', $domain);
 
-    info("Configuring Caddy for: {$domain}");
+    info("Configuring Caddy for: {$domain} (TLS: {$tlsMode})");
+
+    // Build TLS directive
+    $tlsDirective = '';
+    if ($tlsMode === 'internal') {
+        $tlsDirective = '    tls internal';
+    } elseif ($tlsMode !== 'auto' && ! empty($tlsMode)) {
+        // Custom cert path
+        $tlsDirective = "    tls {$tlsMode}";
+    }
 
     $siteConfig = <<<CADDY
 {$domain} {
+{$tlsDirective}
     root * {$fullPath}/current/public
     encode gzip
 
@@ -92,6 +104,10 @@ CADDY;
         run('echo ' . escapeshellarg($newCaddyfile) . ' > /tmp/Caddyfile');
         sudo('mv /tmp/Caddyfile /etc/caddy/Caddyfile');
     }
+
+    // Pre-create log file with correct ownership to avoid permission errors
+    sudo("touch /var/log/caddy/{$domain}.log");
+    sudo("chown caddy:caddy /var/log/caddy/{$domain}.log");
 
     sudo('caddy validate --config /etc/caddy/Caddyfile 2>&1 || true');
     sudo('systemctl reload caddy');
