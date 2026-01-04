@@ -6,6 +6,7 @@ require __DIR__ . '/helpers.php';
 require __DIR__ . '/tasks/env.php';
 require __DIR__ . '/tasks/npm.php';
 require __DIR__ . '/tasks/services.php';
+require __DIR__ . '/provision/bootstrap.php';
 require __DIR__ . '/provision/firewall.php';
 require __DIR__ . '/provision/php.php';
 require __DIR__ . '/provision/composer.php';
