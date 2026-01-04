@@ -79,4 +79,5 @@ after('deploy:symlink', 'php-fpm:restart');
 after('deploy:symlink', 'artisan:up');
 after('artisan:storage:link', 'storage:link-custom');
 after('deploy:symlink', 'deploy:verify');
+after('deploy:symlink', 'queue:restart');
 fail('deploy', 'deploy:unlock');

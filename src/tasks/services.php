@@ -124,3 +124,117 @@ task('horizon:continue', function () {
     run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:continue');
     info('Horizon resumed');
 });
+
+// Supervisor Queue Worker Management
+// -----------------------------------
+// To use queue workers, set 'queue_worker_name' in your deploy.php:
+//   set('queue_worker_name', 'myapp-prod-worker');
+// Or use a callback for dynamic naming:
+//   set('queue_worker_name', fn() => 'myapp-' . getStage() . '-worker');
+
+set('queue_worker_processes', 2);
+
+desc('Install supervisor on server (run as root)');
+task('supervisor:install', function () {
+    run('apt-get update && apt-get install -y supervisor');
+    run('systemctl enable supervisor');
+    run('systemctl start supervisor');
+    info('Supervisor installed and started');
+});
+
+desc('Setup queue worker supervisor config');
+task('queue:setup', function () {
+    $workerName = get('queue_worker_name', '');
+
+    if (empty($workerName)) {
+        warning('queue_worker_name not set. Skipping queue:setup.');
+
+        return;
+    }
+
+    if (! test('[ -x /usr/bin/supervisorctl ]')) {
+        warning('Supervisor is not installed. Run: dep supervisor:install server');
+
+        return;
+    }
+
+    $numProcs = get('queue_worker_processes', 2);
+    $deployPath = run('echo $HOME') . '/' . basename(get('deploy_path'));
+
+    $config = <<<CONF
+[program:{$workerName}]
+process_name=%(program_name)s_%(process_num)02d
+command=php {$deployPath}/current/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=deployer
+numprocs={$numProcs}
+redirect_stderr=true
+stdout_logfile={$deployPath}/shared/storage/logs/queue-worker.log
+stopwaitsecs=3600
+CONF;
+
+    $configPath = "/etc/supervisor/conf.d/{$workerName}.conf";
+
+    if (test("[ -f {$configPath} ]")) {
+        info("Queue worker config already exists at {$configPath}");
+
+        return;
+    }
+
+    run('echo ' . escapeshellarg($config) . " | sudo tee {$configPath}");
+    run('sudo supervisorctl reread');
+    run('sudo supervisorctl update');
+    info("Queue worker {$workerName} configured successfully");
+});
+
+desc('Restart queue workers via supervisor');
+task('queue:restart', function () {
+    $workerName = get('queue_worker_name', '');
+
+    if (empty($workerName)) {
+        return;
+    }
+
+    run("sudo supervisorctl restart {$workerName}:* 2>/dev/null || echo 'Queue worker not configured'");
+});
+
+desc('Show queue worker status');
+task('queue:status', function () {
+    $workerName = get('queue_worker_name', '');
+
+    if (empty($workerName)) {
+        warning('queue_worker_name not set.');
+
+        return;
+    }
+
+    $status = run("sudo supervisorctl status {$workerName}:* 2>/dev/null || echo 'Queue workers not configured'");
+    writeln($status);
+});
+
+desc('Stop queue workers');
+task('queue:stop', function () {
+    $workerName = get('queue_worker_name', '');
+
+    if (empty($workerName)) {
+        return;
+    }
+
+    run("sudo supervisorctl stop {$workerName}:* 2>/dev/null || true");
+    info('Queue workers stopped');
+});
+
+desc('Start queue workers');
+task('queue:start', function () {
+    $workerName = get('queue_worker_name', '');
+
+    if (empty($workerName)) {
+        return;
+    }
+
+    run("sudo supervisorctl start {$workerName}:* 2>/dev/null || true");
+    info('Queue workers started');
+});
