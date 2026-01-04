@@ -16,10 +16,15 @@ task('github:deploy-key', function () {
     $hostname = run('hostname');
     $keyTitle = "deployer@{$hostname}";
 
-    $pubKey = run('cat ~/.ssh/id_ed25519.pub 2>/dev/null || echo ""');
+    $remoteUser = get('remote_user', 'deployer');
+    $keyPath = $remoteUser === 'root'
+        ? '/home/deployer/.ssh/id_ed25519.pub'
+        : '~/.ssh/id_ed25519.pub';
+
+    $pubKey = run("cat {$keyPath} 2>/dev/null || echo ''");
 
     if (empty(trim($pubKey))) {
-        warning('No deploy key found on server');
+        warning("No deploy key found at {$keyPath}");
 
         return;
     }
