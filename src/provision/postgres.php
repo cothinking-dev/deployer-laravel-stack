@@ -27,17 +27,48 @@ task('provision:postgres', function () {
 
     sudo("-u postgres psql -c \"CREATE USER {$dbUser} WITH PASSWORD '{$dbPass}';\" 2>/dev/null || true");
     sudo("-u postgres psql -c \"ALTER USER {$dbUser} CREATEDB;\" 2>/dev/null || true");
-    sudo("-u postgres psql -c \"CREATE DATABASE {$dbName} OWNER {$dbUser};\" 2>/dev/null || true");
 
+    createDatabase($dbName, $dbUser);
+
+    $additionalDbs = get('additional_databases', []);
+    foreach ($additionalDbs as $additionalDb) {
+        createDatabase($additionalDb, $dbUser);
+    }
+
+    sudo('systemctl restart postgresql');
+
+    $allDbs = array_merge([$dbName], $additionalDbs);
+    info('PostgreSQL configured with database(s): ' . implode(', ', $allDbs));
+});
+
+function createDatabase(string $dbName, string $dbUser): void
+{
+    sudo("-u postgres psql -c \"CREATE DATABASE {$dbName} OWNER {$dbUser};\" 2>/dev/null || true");
     sudo("-u postgres psql -d {$dbName} -c \"GRANT ALL ON SCHEMA public TO {$dbUser};\"");
     sudo("-u postgres psql -d {$dbName} -c \"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {$dbUser};\"");
     sudo("-u postgres psql -d {$dbName} -c \"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {$dbUser};\"");
     sudo("-u postgres psql -d {$dbName} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {$dbUser};\"");
     sudo("-u postgres psql -d {$dbName} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {$dbUser};\"");
+}
 
-    sudo('systemctl restart postgresql');
+desc('Create an additional database');
+task('postgres:create-db', function () {
+    $dbName = get('db_name');
+    $dbUser = get('db_username', 'deployer');
 
-    info("PostgreSQL configured with database: {$dbName}");
+    if (! $dbName) {
+        throw new \RuntimeException('db_name option is required');
+    }
+
+    info("Creating database: {$dbName}");
+    createDatabase($dbName, $dbUser);
+    info("Database created: {$dbName}");
+});
+
+desc('List all databases');
+task('postgres:list-dbs', function () {
+    $result = sudo('-u postgres psql -l');
+    writeln($result);
 });
 
 desc('Test database connection');

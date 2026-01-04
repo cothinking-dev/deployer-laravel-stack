@@ -19,7 +19,19 @@ task('provision:caddy', function () {
 
     run('rm -f /tmp/caddy-gpg.key');
 
+    sudo('mkdir -p /etc/caddy/sites-enabled');
+    sudo('mkdir -p /var/log/caddy');
+    sudo('chown caddy:caddy /var/log/caddy');
+
+    $mainCaddyfile = <<<'CADDY'
+import /etc/caddy/sites-enabled/*
+CADDY;
+
+    run('echo ' . escapeshellarg($mainCaddyfile) . ' > /tmp/Caddyfile');
+    sudo('mv /tmp/Caddyfile /etc/caddy/Caddyfile');
+
     sudo('systemctl enable caddy');
+    sudo('systemctl restart caddy');
 
     info('Caddy installed (run caddy:configure to set up your domain)');
 });
@@ -36,10 +48,11 @@ task('caddy:configure', function () {
 
     $homePath = run('echo $HOME');
     $fullPath = str_replace('~', $homePath, $deployPath);
+    $safeDomain = str_replace('.', '-', $domain);
 
     info("Configuring Caddy for: {$domain}");
 
-    $caddyfile = <<<CADDY
+    $siteConfig = <<<CADDY
 {$domain} {
     root * {$fullPath}/current/public
     encode gzip
@@ -65,15 +78,47 @@ task('caddy:configure', function () {
 }
 CADDY;
 
-    sudo('mkdir -p /var/log/caddy');
-    sudo('chown caddy:caddy /var/log/caddy');
+    sudo('mkdir -p /etc/caddy/sites-enabled');
 
-    run('echo ' . escapeshellarg($caddyfile) . ' > /tmp/Caddyfile');
-    sudo('mv /tmp/Caddyfile /etc/caddy/Caddyfile');
-    sudo('caddy fmt --overwrite /etc/caddy/Caddyfile');
-    sudo('systemctl restart caddy');
+    run('echo ' . escapeshellarg($siteConfig) . ' > /tmp/caddy-site.conf');
+    sudo("mv /tmp/caddy-site.conf /etc/caddy/sites-enabled/{$safeDomain}.conf");
+    sudo("caddy fmt --overwrite /etc/caddy/sites-enabled/{$safeDomain}.conf");
+
+    $mainCaddyfile = trim(sudo('cat /etc/caddy/Caddyfile 2>/dev/null || echo ""'));
+    if (strpos($mainCaddyfile, 'import /etc/caddy/sites-enabled/*') === false) {
+        $newCaddyfile = "import /etc/caddy/sites-enabled/*\n" . $mainCaddyfile;
+        run('echo ' . escapeshellarg($newCaddyfile) . ' > /tmp/Caddyfile');
+        sudo('mv /tmp/Caddyfile /etc/caddy/Caddyfile');
+    }
+
+    sudo('caddy validate --config /etc/caddy/Caddyfile 2>&1 || true');
+    sudo('systemctl reload caddy');
 
     info("Caddy configured for: {$domain}");
+});
+
+desc('Remove a site from Caddy');
+task('caddy:remove-site', function () {
+    $domain = get('domain');
+
+    if (! $domain) {
+        throw new \RuntimeException('domain option is required');
+    }
+
+    $safeDomain = str_replace('.', '-', $domain);
+
+    info("Removing Caddy site: {$domain}");
+
+    sudo("rm -f /etc/caddy/sites-enabled/{$safeDomain}.conf");
+    sudo('systemctl reload caddy');
+
+    info("Removed: {$domain}");
+});
+
+desc('List configured Caddy sites');
+task('caddy:list-sites', function () {
+    $result = sudo('ls -la /etc/caddy/sites-enabled/ 2>/dev/null || echo "No sites configured"');
+    writeln($result);
 });
 
 desc('Reload Caddy configuration');
