@@ -1,0 +1,108 @@
+#!/bin/bash
+set -eo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+readonly SECRETS_FILE="deploy/secrets.tpl"
+
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+error() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info() { echo -e "${BLUE}$*${NC}"; }
+success() { echo -e "${GREEN}$*${NC}"; }
+
+cd "$PROJECT_DIR"
+
+show_usage() {
+    echo "Usage: ./deploy/dep <command> <environment>"
+    echo ""
+    echo "Environments:"
+    echo "  prod     - Production"
+    echo "  staging  - Staging"
+    echo "  server   - Bootstrap (runs as root)"
+    echo ""
+    echo "Fresh server setup:"
+    echo "  ./deploy/dep setup:server server"
+    echo "  ./deploy/dep setup:environment prod"
+    echo ""
+    echo "Regular deploys:"
+    echo "  ./deploy/dep deploy prod"
+    echo "  ./deploy/dep deploy staging"
+    echo ""
+    echo "Multi-environment commands:"
+    echo "  ./deploy/dep caddy:all     - Configure Caddy for all environments"
+    echo "  ./deploy/dep deploy:all    - Deploy to all environments"
+    exit 1
+}
+
+ENV=""
+COMMAND=""
+ARGS=()
+
+for arg in "$@"; do
+    if [[ "$arg" == "prod" || "$arg" == "staging" || "$arg" == "server" ]]; then
+        ENV="$arg"
+    fi
+    if [[ -z "$COMMAND" && "$arg" != -* ]]; then
+        COMMAND="$arg"
+    fi
+    ARGS+=("$arg")
+done
+
+if [[ "$COMMAND" == "caddy:all" || "$COMMAND" == "deploy:all" ]]; then
+    ENV="all"
+fi
+
+[[ -z "$ENV" ]] && show_usage
+
+DEPLOYER_ENV="$ENV"
+[[ "$ENV" == "server" || "$ENV" == "all" ]] && DEPLOYER_ENV="prod"
+
+[[ ! -f "$SECRETS_FILE" ]] && error "Secrets file not found: $SECRETS_FILE"
+
+command -v op >/dev/null 2>&1 || error "1Password CLI (op) not installed.\nInstall: brew install 1password-cli"
+command -v gh >/dev/null 2>&1 || error "GitHub CLI (gh) not installed.\nInstall: brew install gh"
+
+if ! op account list &>/dev/null 2>&1; then
+    info "Signing in to 1Password..."
+    eval "$(op signin)"
+fi
+
+if ! gh auth status &>/dev/null 2>&1; then
+    info "Authenticating with GitHub..."
+    gh auth login
+fi
+
+info "Environment: $DEPLOYER_ENV"
+export DEPLOYER_ENV
+
+run_deployer() {
+    op run --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
+}
+
+case "$COMMAND" in
+    caddy:all)
+        success "[1/2] Configuring Caddy for prod..."
+        run_deployer caddy:configure prod -v
+        echo ""
+        success "[2/2] Configuring Caddy for staging..."
+        run_deployer caddy:configure staging -v
+        echo ""
+        success "Caddy configured for all environments"
+        ;;
+    deploy:all)
+        success "[1/2] Deploying prod..."
+        run_deployer deploy prod -v
+        echo ""
+        success "[2/2] Deploying staging..."
+        run_deployer deploy staging -v
+        echo ""
+        success "Deployed to all environments"
+        ;;
+    *)
+        run_deployer "${ARGS[@]}"
+        ;;
+esac
