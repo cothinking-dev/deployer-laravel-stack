@@ -49,6 +49,9 @@ task('deploy:fix-permissions', function () {
 
 before('deploy:shared', 'deploy:env');
 before('deploy:symlink', 'deploy:fix-permissions');
+before('deploy:symlink', 'artisan:down');
+before('deploy:symlink', 'horizon:terminate');
 after('deploy:vendors', 'npm:install');
 after('npm:install', 'npm:build');
 after('deploy:symlink', 'php-fpm:restart');
+after('deploy:symlink', 'artisan:up');

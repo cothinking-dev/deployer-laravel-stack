@@ -54,8 +54,35 @@ set('env_base', function () {
     ];
 });
 
+set('env_safe_mode', true);
+
 desc('Generate .env file from Deployer configuration');
 task('deploy:env', function () {
+    $path = '{{deploy_path}}/shared/.env';
+    $safeMode = get('env_safe_mode', true);
+
+    run('mkdir -p {{deploy_path}}/shared');
+
+    if ($safeMode && test("[ -f {$path} ]")) {
+        info('.env exists, skipping (safe mode). Use deploy:env:force to overwrite.');
+
+        return;
+    }
+
+    $baseEnv = get('env_base');
+    $extras = has('env_extras') ? get('env_extras') : [];
+
+    $env = array_merge($baseEnv, $extras);
+    $content = envToString($env);
+
+    run('echo ' . escapeshellarg($content) . " > {$path}");
+    run("chmod 640 {$path}");
+
+    info('Generated .env for: ' . getStage());
+});
+
+desc('Force regenerate .env file (overwrites existing)');
+task('deploy:env:force', function () {
     $baseEnv = get('env_base');
     $extras = has('env_extras') ? get('env_extras') : [];
 
@@ -65,8 +92,75 @@ task('deploy:env', function () {
     run('mkdir -p {{deploy_path}}/shared');
 
     $path = '{{deploy_path}}/shared/.env';
+
+    if (test("[ -f {$path} ]")) {
+        $timestamp = date('Y-m-d-His');
+        run("cp {$path} {$path}.backup.{$timestamp}");
+        info("Backed up existing .env to .env.backup.{$timestamp}");
+    }
+
     run('echo ' . escapeshellarg($content) . " > {$path}");
     run("chmod 640 {$path}");
 
     info('Generated .env for: ' . getStage());
+});
+
+desc('Show current .env values (masked secrets)');
+task('env:show', function () {
+    $path = '{{deploy_path}}/shared/.env';
+
+    if (! test("[ -f {$path} ]")) {
+        warning('No .env file found');
+
+        return;
+    }
+
+    $content = run("cat {$path}");
+
+    $masked = preg_replace_callback(
+        '/^(.*(?:KEY|SECRET|PASSWORD|TOKEN|CREDENTIALS).*)=(.+)$/mi',
+        fn ($m) => $m[1] . '=' . str_repeat('*', min(strlen($m[2]), 20)),
+        $content
+    );
+
+    writeln($masked);
+});
+
+desc('Show .env backups');
+task('env:backups', function () {
+    $path = '{{deploy_path}}/shared';
+    $backups = run("ls -la {$path}/.env.backup.* 2>/dev/null || echo 'No backups found'");
+    writeln($backups);
+});
+
+desc('Restore .env from backup');
+task('env:restore', function () {
+    $path = '{{deploy_path}}/shared';
+    $backups = run("ls -1 {$path}/.env.backup.* 2>/dev/null | sort -r");
+
+    if (empty(trim($backups))) {
+        warning('No backups found');
+
+        return;
+    }
+
+    $backupFiles = array_filter(explode("\n", trim($backups)));
+    writeln('Available backups:');
+    foreach ($backupFiles as $i => $file) {
+        writeln("  [{$i}] " . basename($file));
+    }
+
+    $choice = ask('Enter backup number to restore:', '0');
+    $selectedBackup = $backupFiles[(int) $choice] ?? null;
+
+    if (! $selectedBackup) {
+        warning('Invalid selection');
+
+        return;
+    }
+
+    $timestamp = date('Y-m-d-His');
+    run("cp {$path}/.env {$path}/.env.pre-restore.{$timestamp}");
+    run("cp {$selectedBackup} {$path}/.env");
+    info('Restored from: ' . basename($selectedBackup));
 });

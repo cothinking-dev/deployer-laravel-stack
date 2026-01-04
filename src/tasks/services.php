@@ -63,3 +63,64 @@ task('app:status', function () {
     writeln('Disk Usage:');
     run('df -h {{deploy_path}}');
 });
+
+set('maintenance_mode', true);
+
+desc('Put application in maintenance mode');
+task('artisan:down', function () {
+    if (! get('maintenance_mode', true)) {
+        return;
+    }
+
+    if (! test('[ -f {{deploy_path}}/current/artisan ]')) {
+        return;
+    }
+
+    $secret = get('maintenance_secret', bin2hex(random_bytes(16)));
+    run("cd {{deploy_path}}/current && {{bin/php}} artisan down --secret={$secret} --retry=60");
+    info("Maintenance mode enabled (secret: {$secret})");
+});
+
+desc('Bring application out of maintenance mode');
+task('artisan:up', function () {
+    if (! get('maintenance_mode', true)) {
+        return;
+    }
+
+    run('cd {{release_path}} && {{bin/php}} artisan up');
+    info('Application is now live');
+});
+
+set('horizon_enabled', false);
+
+desc('Terminate Horizon workers gracefully');
+task('horizon:terminate', function () {
+    if (! get('horizon_enabled', false)) {
+        return;
+    }
+
+    if (! test('[ -f {{deploy_path}}/current/artisan ]')) {
+        return;
+    }
+
+    run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:terminate 2>/dev/null || true');
+    info('Horizon workers terminating...');
+});
+
+desc('Check Horizon status');
+task('horizon:status', function () {
+    $status = run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:status 2>/dev/null || echo "Horizon not running"');
+    writeln($status);
+});
+
+desc('Pause Horizon processing');
+task('horizon:pause', function () {
+    run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:pause');
+    info('Horizon paused');
+});
+
+desc('Resume Horizon processing');
+task('horizon:continue', function () {
+    run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:continue');
+    info('Horizon resumed');
+});
