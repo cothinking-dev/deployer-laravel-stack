@@ -2,6 +2,8 @@
 
 namespace Deployer;
 
+set('bootstrap_user', 'deployer');
+
 desc('Bootstrap server: create deployer user with SSH keys (run as root)');
 task('provision:bootstrap', function () {
     $secrets = has('secrets') ? get('secrets') : [];
@@ -11,7 +13,7 @@ task('provision:bootstrap', function () {
         throw new \RuntimeException('No sudo password configured for deployer user.');
     }
 
-    $user = get('remote_user', 'deployer');
+    $user = get('bootstrap_user');
 
     info("Creating user '{$user}' and setting up SSH access...");
 
