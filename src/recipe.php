@@ -56,6 +56,7 @@ task('setup:server', [
 
 desc('Provision and deploy an environment');
 task('setup:environment', [
+    'deploy:unlock',
     'provision:all',
     'caddy:configure',
     'deploy',
