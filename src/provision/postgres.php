@@ -25,8 +25,8 @@ task('provision:postgres', function () {
         info('PostgreSQL configured to listen on localhost only');
     }
 
-    sudo("-u postgres psql -c \"CREATE USER {$dbUser} WITH PASSWORD '{$dbPass}';\" 2>/dev/null || true");
-    sudo("-u postgres psql -c \"ALTER USER {$dbUser} CREATEDB;\" 2>/dev/null || true");
+    run("sudo -u postgres psql -c \"CREATE USER {$dbUser} WITH PASSWORD '%secret%';\" 2>/dev/null || true", secret: $dbPass);
+    run('sudo -u postgres psql -c "ALTER USER ' . $dbUser . ' CREATEDB;" 2>/dev/null || true');
 
     createDatabase($dbName, $dbUser);
 
@@ -43,12 +43,12 @@ task('provision:postgres', function () {
 
 function createDatabase(string $dbName, string $dbUser): void
 {
-    sudo("-u postgres psql -c \"CREATE DATABASE {$dbName} OWNER {$dbUser};\" 2>/dev/null || true");
-    sudo("-u postgres psql -d {$dbName} -c \"GRANT ALL ON SCHEMA public TO {$dbUser};\"");
-    sudo("-u postgres psql -d {$dbName} -c \"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {$dbUser};\"");
-    sudo("-u postgres psql -d {$dbName} -c \"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {$dbUser};\"");
-    sudo("-u postgres psql -d {$dbName} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {$dbUser};\"");
-    sudo("-u postgres psql -d {$dbName} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {$dbUser};\"");
+    run("sudo -u postgres psql -c \"CREATE DATABASE {$dbName} OWNER {$dbUser};\" 2>/dev/null || true");
+    run("sudo -u postgres psql -d {$dbName} -c \"GRANT ALL ON SCHEMA public TO {$dbUser};\"");
+    run("sudo -u postgres psql -d {$dbName} -c \"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {$dbUser};\"");
+    run("sudo -u postgres psql -d {$dbName} -c \"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {$dbUser};\"");
+    run("sudo -u postgres psql -d {$dbName} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {$dbUser};\"");
+    run("sudo -u postgres psql -d {$dbName} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {$dbUser};\"");
 }
 
 desc('Create an additional database');
@@ -67,7 +67,7 @@ task('postgres:create-db', function () {
 
 desc('List all databases');
 task('postgres:list-dbs', function () {
-    $result = sudo('-u postgres psql -l');
+    $result = run('sudo -u postgres psql -l');
     writeln($result);
 });
 
@@ -79,7 +79,7 @@ task('db:check', function () {
 
     info("Testing connection to database: {$dbName}");
 
-    $result = run("PGPASSWORD='{$dbPass}' psql -h 127.0.0.1 -U {$dbUser} -d {$dbName} -c '\\dt' 2>&1");
+    $result = run("PGPASSWORD='%secret%' psql -h 127.0.0.1 -U {$dbUser} -d {$dbName} -c '\\dt' 2>&1", secret: $dbPass);
     writeln($result);
 
     info('Database connection successful');
@@ -90,7 +90,7 @@ task('db:reset-password', function () {
     $dbPass = getSecret('db_password');
     $dbUser = get('db_username', 'deployer');
 
-    sudo("-u postgres psql -c \"ALTER USER {$dbUser} WITH PASSWORD '{$dbPass}';\"");
+    run("sudo -u postgres psql -c \"ALTER USER {$dbUser} WITH PASSWORD '%secret%';\"", secret: $dbPass);
     info("Password reset for user: {$dbUser}");
 });
 

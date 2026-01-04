@@ -14,6 +14,7 @@ require __DIR__ . '/provision/node.php';
 require __DIR__ . '/provision/postgres.php';
 require __DIR__ . '/provision/redis.php';
 require __DIR__ . '/provision/caddy.php';
+require __DIR__ . '/provision/fail2ban.php';
 
 set('php_version', '8.4');
 set('node_version', '22');
@@ -22,6 +23,7 @@ set('db_username', 'deployer');
 desc('Run all provisioning tasks (new server setup)');
 task('provision:all', [
     'provision:firewall',
+    'provision:fail2ban',
     'provision:php',
     'provision:composer',
     'provision:node',
