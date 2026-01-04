@@ -82,15 +82,20 @@ Edit `deploy.php` and update:
 
 ### 4. Deploy
 
+**Fresh server (3 commands):**
+
 ```bash
-# Bootstrap server (creates deployer user, SSH keys, adds deploy key to GitHub)
-./deploy/dep setup:server server
+./deploy/dep setup:server server           # Bootstrap + add GitHub deploy key
+./deploy/dep setup:environment prod        # Provision + Caddy + deploy prod
+./deploy/dep setup:environment staging     # Add staging (fast - reuses provisioning)
+```
 
-# Provision and deploy production
-./deploy/dep setup:environment prod
+**Regular deployments:**
 
-# (Optional) Add staging - uses same server, separate deployment
-./deploy/dep setup:environment staging
+```bash
+./deploy/dep deploy prod      # Deploy to production
+./deploy/dep deploy staging   # Deploy to staging
+./deploy/dep deploy:all       # Deploy to all environments
 ```
 
 ## File Structure
@@ -122,21 +127,26 @@ Prod and staging are **separate deployments** on the same server:
 ### Fresh Server Setup
 
 ```bash
-# 1. Bootstrap server (once)
-./deploy/dep setup:server server
-
-# 2. Setup each environment
-./deploy/dep setup:environment prod
-./deploy/dep setup:environment staging
+./deploy/dep setup:server server           # 1. Bootstrap + GitHub deploy key
+./deploy/dep setup:environment prod        # 2. Provision + Caddy + deploy prod
+./deploy/dep setup:environment staging     # 3. Add staging (fast)
 ```
 
 The second `setup:environment` is fast - provisioning tasks are idempotent and skip if already installed.
 
-### Alternative: Manual Steps
+### Regular Deployments
 
 ```bash
-./deploy/dep setup:server server    # Bootstrap deployer user
-./deploy/dep provision:all prod     # Install PHP, Postgres, Redis, etc. (once)
+./deploy/dep deploy prod      # Deploy to production
+./deploy/dep deploy staging   # Deploy to staging
+./deploy/dep deploy:all       # Deploy to all environments
+```
+
+### Manual Steps (if needed)
+
+```bash
+./deploy/dep setup:server server    # Bootstrap deployer user + GitHub key
+./deploy/dep provision:all prod     # Install PHP, Postgres, Redis, etc.
 ./deploy/dep caddy:all              # Configure Caddy for all domains
 ./deploy/dep deploy:all             # Deploy all environments
 ```
