@@ -463,6 +463,83 @@ ssh root@your-server "sudo -u postgres psql -c \"ALTER USER deployer WITH PASSWO
 curl -I https://your-domain.com
 ```
 
+## Multiple Projects on One Server
+
+This recipe supports hosting multiple Laravel projects on the same server. Each project maintains its own configuration, and shared services (Caddy, PostgreSQL, Redis) are designed to handle multiple tenants.
+
+### How It Works
+
+**Caddy** uses per-domain config files:
+```
+/etc/caddy/sites-enabled/
+├── project-a-com.conf           → ~/project-a/current/public
+├── staging-project-a-com.conf   → ~/project-a-staging/current/public
+├── project-b-com.conf           → ~/project-b/current/public
+└── staging-project-b-com.conf   → ~/project-b-staging/current/public
+```
+
+Each domain gets its own config file, so there are no conflicts.
+
+### Resource Allocation
+
+When setting up multiple projects, coordinate these resources:
+
+| Resource | Project A | Project B |
+| -------- | --------- | --------- |
+| Deploy path (prod) | `~/project-a` | `~/project-b` |
+| Deploy path (staging) | `~/project-a-staging` | `~/project-b-staging` |
+| Database (prod) | `project_a` | `project_b` |
+| Database (staging) | `project_a_staging` | `project_b_staging` |
+| Redis DB (prod) | `0` | `2` |
+| Redis DB (staging) | `1` | `3` |
+| Queue worker | `project-a-prod-worker` | `project-b-prod-worker` |
+
+### Redis DB Numbers
+
+Redis supports databases 0-15. Allocate unique numbers per environment:
+
+```php
+// Project A
+environment('prod', ['redis_db' => 0, ...]);
+environment('staging', ['redis_db' => 1, ...]);
+
+// Project B
+environment('prod', ['redis_db' => 2, ...]);
+environment('staging', ['redis_db' => 3, ...]);
+```
+
+### Setting Up a Second Project
+
+For the second (and subsequent) projects, provisioning is fast since services are already installed:
+
+```bash
+# From Project B's directory
+./deploy/dep setup:server server           # Adds Project B's deploy key to GitHub
+./deploy/dep setup:environment prod        # Creates DB, Caddy config, deploys
+./deploy/dep setup:environment staging     # Creates staging DB, Caddy config, deploys
+```
+
+The `provision:*` tasks are idempotent - they skip installation if the service already exists.
+
+### Shared Services
+
+These services are shared across all projects:
+
+| Service | Sharing Model |
+| ------- | ------------- |
+| **PHP-FPM** | Single pool, shared by all projects |
+| **PostgreSQL** | One instance, separate databases per project |
+| **Redis** | One instance, separate DB numbers per project |
+| **Caddy** | One instance, separate site configs per domain |
+| **Supervisor** | One instance, separate worker configs per project |
+
+### Considerations
+
+1. **Memory** - Each project's queue workers consume memory. Monitor server resources.
+2. **PHP-FPM pool** - All projects share one pool. For isolation, consider separate pools (not covered by this recipe).
+3. **Secrets** - Each project has its own `deploy/secrets.tpl` with its own 1Password references.
+4. **Deploy user** - All projects share the `deployer` user and its SSH key.
+
 ## Upgrading from v2.x (env-extras.php)
 
 If you're upgrading from a version that used `deploy/config/env-extras.php`:
