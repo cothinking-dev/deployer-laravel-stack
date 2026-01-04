@@ -2,7 +2,6 @@
 
 namespace Deployer;
 
-require __DIR__ . '/helpers.php';
 require __DIR__ . '/tasks/env.php';
 require __DIR__ . '/tasks/npm.php';
 require __DIR__ . '/tasks/services.php';
