@@ -83,16 +83,14 @@ Edit `deploy.php` and update:
 ### 4. Deploy
 
 ```bash
-# Bootstrap server (creates deployer user, sets up SSH, adds deploy key to GitHub)
+# Bootstrap server (creates deployer user, SSH keys, adds deploy key to GitHub)
 ./deploy/dep setup:server server
 
-# Provision and deploy to production
+# Provision and deploy production
 ./deploy/dep setup:environment prod
 
-# Or step by step:
-./deploy/dep provision:all prod
-./deploy/dep caddy:configure prod
-./deploy/dep deploy prod
+# (Optional) Add staging - uses same server, separate deployment
+./deploy/dep setup:environment staging
 ```
 
 ## File Structure
@@ -101,12 +99,46 @@ After setup, your project should have:
 
 ```
 your-project/
-├── deploy.php                    # Main deployer config
+├── deploy.php                    # Main deployer config (user modifies this)
 └── deploy/
-    ├── dep                       # Bash wrapper (handles 1Password + GitHub CLI)
+    ├── dep                       # Thin wrapper (delegates to recipe's bin/dep)
     ├── secrets.tpl               # 1Password secret references
     └── config/
         └── env-extras.php        # Additional .env variables per environment
+```
+
+## Multi-Environment Setup
+
+Prod and staging are **separate deployments** on the same server:
+
+| Setting     | prod        | staging             |
+| ----------- | ----------- | ------------------- |
+| Deploy path | `~/myapp`   | `~/myapp-staging`   |
+| Branch      | `main`      | `staging`           |
+| Database    | `myapp`     | `myapp_staging`     |
+| Redis DB    | `0`         | `1`                 |
+| Domain      | `myapp.com` | `staging.myapp.com` |
+
+### Fresh Server Setup
+
+```bash
+# 1. Bootstrap server (once)
+./deploy/dep setup:server server
+
+# 2. Setup each environment
+./deploy/dep setup:environment prod
+./deploy/dep setup:environment staging
+```
+
+The second `setup:environment` is fast - provisioning tasks are idempotent and skip if already installed.
+
+### Alternative: Manual Steps
+
+```bash
+./deploy/dep setup:server server    # Bootstrap deployer user
+./deploy/dep provision:all prod     # Install PHP, Postgres, Redis, etc. (once)
+./deploy/dep caddy:all              # Configure Caddy for all domains
+./deploy/dep deploy:all             # Deploy all environments
 ```
 
 ## Available Commands
@@ -168,6 +200,12 @@ your-project/
 | `./deploy/dep db:check prod`          | Test database connection |
 | `./deploy/dep postgres:list-dbs prod` | List all databases       |
 
+### GitHub
+
+| Command                                 | Description                            |
+| --------------------------------------- | -------------------------------------- |
+| `./deploy/dep github:deploy-key server` | Add server's deploy key to GitHub repo |
+
 ### Utilities
 
 | Command                                | Description            |
@@ -176,33 +214,87 @@ your-project/
 | `./deploy/dep artisan:log:follow prod` | Follow Laravel log     |
 | `./deploy/dep app:status prod`         | Show deployment status |
 | `./deploy/dep ssh prod`                | SSH into server        |
+| `./deploy/dep deploy:verify prod`      | Run HTTP health check  |
 
-## Configuration Options
+## Configuration
 
-### PHP Configuration (deploy.php)
-
-```php
-set('php_version', '8.4');     // PHP version to install
-set('node_version', '22');      // Node.js major version
-set('db_username', 'deployer'); // PostgreSQL username
-```
-
-### Host Configuration
+### deploy.php Example
 
 ```php
-host('prod')
-    ->setHostname('your-server.com')
-    ->set('remote_user', 'deployer')
-    ->set('deploy_path', '~/myapp')
-    ->set('branch', 'main')
-    ->set('domain', 'myapp.com')
-    ->set('url', 'https://myapp.com')
-    ->set('db_name', 'myapp')
-    ->set('redis_db', '0')
-    ->set('app_env', 'production')
-    ->set('app_debug', 'false')
-    ->set('log_level', 'error')
-    ->set('tls_mode', 'internal');  // 'internal' for Cloudflare, 'acme' for Let's Encrypt
+<?php
+
+namespace Deployer;
+
+require 'recipe/laravel.php';
+require 'vendor/cothinking-dev/deployer-laravel-stack/src/recipe.php';
+
+set('application', 'My App');
+set('repository', 'git@github.com:org/repo.git');
+set('keep_releases', 5);
+
+// Secrets from 1Password (via deploy/dep wrapper)
+set('secrets', function () {
+    return requireSecrets(
+        ['DEPLOYER_SUDO_PASS', 'DEPLOYER_DB_PASSWORD', 'DEPLOYER_APP_KEY'],
+        ['DEPLOYER_OPTIONAL_SECRET' => '']  // Optional with default
+    );
+});
+
+$serverHostname = 'your-server.com';
+
+// Bootstrap host (root access for initial setup)
+host('server')
+    ->setHostname($serverHostname)
+    ->set('remote_user', 'root')
+    ->set('labels', ['stage' => 'server']);
+
+// Environment defaults
+$defaults = [
+    'tls_mode' => 'internal',  // 'internal' for Cloudflare, 'acme' for Let's Encrypt
+    'app_debug' => 'false',
+    'log_level' => 'error',
+];
+
+// Define environments
+$environments = [
+    'prod' => [
+        'deploy_path' => '~/myapp',
+        'branch' => 'main',
+        'domain' => 'myapp.com',
+        'db_name' => 'myapp',
+        'redis_db' => '0',
+        'app_env' => 'production',
+    ],
+    'staging' => [
+        'deploy_path' => '~/myapp-staging',
+        'branch' => 'staging',
+        'domain' => 'staging.myapp.com',
+        'db_name' => 'myapp_staging',
+        'redis_db' => '1',
+        'app_env' => 'staging',
+        'app_debug' => 'true',
+        'log_level' => 'debug',
+    ],
+];
+
+foreach ($environments as $name => $config) {
+    $merged = array_merge($defaults, $config);
+
+    host($name)
+        ->setHostname($serverHostname)
+        ->set('remote_user', 'deployer')
+        ->set('labels', ['stage' => $name])
+        ->set('url', "https://{$merged['domain']}")
+        ->set('deploy_path', $merged['deploy_path'])
+        ->set('branch', $merged['branch'])
+        ->set('domain', $merged['domain'])
+        ->set('db_name', $merged['db_name'])
+        ->set('redis_db', $merged['redis_db'])
+        ->set('app_env', $merged['app_env'])
+        ->set('app_debug', $merged['app_debug'])
+        ->set('log_level', $merged['log_level'])
+        ->set('tls_mode', $merged['tls_mode']);
+}
 ```
 
 ### Environment Extras (deploy/config/env-extras.php)
@@ -219,6 +311,7 @@ return [
     ],
     'prod' => [
         'GTM_ID' => 'GTM-XXXXXXX',
+        'STRIPE_KEY' => '{stripe_key}',  // References secrets['stripe_key']
     ],
     'staging' => [
         'GTM_ID' => '',
@@ -226,26 +319,13 @@ return [
 ];
 ```
 
-### Secrets
-
-Secrets are injected via 1Password CLI. Reference them in your deploy.php:
-
-```php
-set('secrets', function () {
-    return [
-        'sudo_pass' => getenv('DEPLOYER_SUDO_PASS'),
-        'db_password' => getenv('DEPLOYER_DB_PASSWORD'),
-        'app_key' => getenv('DEPLOYER_APP_KEY'),
-        // Add more as needed
-        'stripe_secret' => getenv('DEPLOYER_STRIPE_SECRET') ?: '',
-    ];
-});
-```
-
-Then in `deploy/secrets.tpl`:
+### Secrets (deploy/secrets.tpl)
 
 ```bash
-DEPLOYER_STRIPE_SECRET=op://Vault/item/stripe-secret
+DEPLOYER_SUDO_PASS=op://Vault/Server/sudo-password
+DEPLOYER_DB_PASSWORD=op://Vault/Server/db-password
+DEPLOYER_APP_KEY=op://Vault/App/laravel-key
+DEPLOYER_STRIPE_KEY=op://Vault/Stripe/secret-key
 ```
 
 ## TLS Modes
@@ -268,7 +348,7 @@ DEPLOYER_STRIPE_SECRET=op://Vault/item/stripe-secret
 1. **Lock** - Prevent concurrent deployments
 2. **Release** - Create new release directory
 3. **Update Code** - Clone/archive from git
-4. **Generate .env** - Create environment file
+4. **Generate .env** - Create environment file from secrets
 5. **Shared** - Symlink shared files/directories
 6. **Vendors** - Install composer dependencies
 7. **NPM** - Install and build frontend assets
@@ -285,13 +365,31 @@ DEPLOYER_STRIPE_SECRET=op://Vault/item/stripe-secret
 # Check if key exists on server
 ssh deployer@your-server "cat ~/.ssh/id_ed25519.pub"
 
-# Manually add to GitHub if needed
+# Re-run the GitHub deploy key task
+./deploy/dep github:deploy-key server
+
+# Or manually add to GitHub
 gh repo deploy-key add - --title "deployer@hostname" -R org/repo
+```
+
+### Sudo permission denied
+
+The deployer user has NOPASSWD sudo for whitelisted commands only. If a command fails:
+
+```bash
+# Check current sudo rules
+./deploy/dep provision:sudo:show server
+
+# Re-run bootstrap to update rules (as root)
+./deploy/dep provision:bootstrap server
 ```
 
 ### Database connection failed
 
 ```bash
+# Check database exists
+./deploy/dep db:check prod
+
 # Reset database password
 ssh root@your-server "sudo -u postgres psql -c \"ALTER USER deployer WITH PASSWORD 'newpass';\""
 ```
@@ -304,16 +402,9 @@ ssh root@your-server "sudo -u postgres psql -c \"ALTER USER deployer WITH PASSWO
 
 # Check Caddy status
 ./deploy/dep caddy:status prod
-```
 
-## Multi-Environment Workflow
-
-```bash
-# Fresh server with prod + staging
-./deploy/dep setup:server server
-./deploy/dep provision:all prod
-./deploy/dep caddy:all
-./deploy/dep deploy:all
+# Manual health check
+curl -I https://your-domain.com
 ```
 
 ## License
