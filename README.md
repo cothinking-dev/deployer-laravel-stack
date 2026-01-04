@@ -370,9 +370,11 @@ The second `setup:environment` is fast - provisioning tasks are idempotent and s
 
 ### GitHub
 
-| Command                                 | Description                            |
-| --------------------------------------- | -------------------------------------- |
-| `./deploy/dep github:deploy-key server` | Add server's deploy key to GitHub repo |
+| Command                                  | Description                                  |
+| ---------------------------------------- | -------------------------------------------- |
+| `./deploy/dep github:generate-key server`| Generate project-specific deploy key         |
+| `./deploy/dep github:deploy-key server`  | Add deploy key to GitHub repo                |
+| `./deploy/dep github:show-key server`    | Show the deploy key for this project         |
 
 ### Utilities
 
@@ -533,12 +535,45 @@ These services are shared across all projects:
 | **Caddy** | One instance, separate site configs per domain |
 | **Supervisor** | One instance, separate worker configs per project |
 
+### Deploy Keys (Important!)
+
+GitHub requires deploy keys to be unique per repository. You **cannot** use the same SSH key for multiple repos.
+
+**For multi-project servers, generate project-specific keys:**
+
+```bash
+# From Project A's directory
+./deploy/dep github:generate-key server    # Creates ~/.ssh/deploy_org_project-a
+./deploy/dep github:deploy-key server      # Adds to GitHub
+
+# From Project B's directory
+./deploy/dep github:generate-key server    # Creates ~/.ssh/deploy_org_project-b
+./deploy/dep github:deploy-key server      # Adds to GitHub
+```
+
+This creates separate keys per project:
+```
+~/.ssh/
+├── deploy_Moojing-Global_moojing-global.com-laravel      # Project A private key
+├── deploy_Moojing-Global_moojing-global.com-laravel.pub  # Project A public key
+├── deploy_cothinking-dev_pixaproof                        # Project B private key
+├── deploy_cothinking-dev_pixaproof.pub                    # Project B public key
+└── config                                                  # SSH config with host aliases
+```
+
+The recipe also configures `~/.ssh/config` with host aliases so each project uses its own key automatically.
+
+**If you already have projects sharing the old single key:**
+1. Run `github:generate-key server` from each project
+2. Add the new keys to each GitHub repo
+3. Remove the old shared key from GitHub
+
 ### Considerations
 
 1. **Memory** - Each project's queue workers consume memory. Monitor server resources.
 2. **PHP-FPM pool** - All projects share one pool. For isolation, consider separate pools (not covered by this recipe).
 3. **Secrets** - Each project has its own `deploy/secrets.tpl` with its own 1Password references.
-4. **Deploy user** - All projects share the `deployer` user and its SSH key.
+4. **Deploy user** - All projects share the `deployer` user but each has its own deploy key.
 
 ## Upgrading from v2.x (env-extras.php)
 
