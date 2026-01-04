@@ -56,7 +56,7 @@ task('github:deploy-key', function () {
 
         if ($keyId) {
             info("Replacing old deploy key (ID: {$keyId}) with new one...");
-            $deleteResult = runLocally("gh repo deploy-key delete {$keyId} -R {$repoPath} --yes 2>&1 || echo 'DELETE_FAILED'");
+            $deleteResult = runLocally("echo 'y' | gh repo deploy-key delete {$keyId} -R {$repoPath} 2>&1 || echo 'DELETE_FAILED'");
 
             if (str_contains($deleteResult, 'DELETE_FAILED')) {
                 warning("Failed to delete old deploy key: {$deleteResult}");
