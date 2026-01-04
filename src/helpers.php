@@ -127,6 +127,8 @@ function environment(string $name, array $config): void
     host($name)
         ->setHostname($hostname)
         ->set('remote_user', 'deployer')
+        ->set('forward_agent', false)
+        ->set('git_ssh_command', 'ssh -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes')
         ->set('labels', ['stage' => $name])
         ->set('url', "https://{$config['domain']}")
         ->set('deploy_path', $config['deploy_path'])
