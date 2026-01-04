@@ -17,7 +17,7 @@ A [Deployer](https://deployer.org/) recipe for Laravel applications with automat
 **Local Machine:**
 
 - PHP 8.2+
-- [Deployer 7.x](https://deployer.org/)
+- [Deployer 8.x](https://deployer.org/)
 - [1Password CLI](https://developer.1password.com/docs/cli/) (`brew install 1password-cli`)
 - [GitHub CLI](https://cli.github.com/) (`brew install gh`)
 
@@ -39,7 +39,7 @@ Add the repository to your `composer.json`:
     }
   ],
   "require-dev": {
-    "deployer/deployer": "^7.5",
+    "deployer/deployer": "^8.0@alpha",
     "cothinking-dev/deployer-laravel-stack": "^2.0"
   }
 }

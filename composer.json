@@ -19,7 +19,7 @@
   ],
   "require": {
     "php": "^8.2",
-    "deployer/deployer": "^7.0"
+    "deployer/deployer": "^8.0@alpha"
   },
   "autoload": {
     "files": [
