@@ -1,0 +1,126 @@
+#!/bin/bash
+set -eo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+    readonly PROJECT_DIR="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}")")/../../.." && pwd)"
+else
+    readonly PROJECT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+fi
+
+readonly SECRETS_FILE="${DEPLOYER_SECRETS_FILE:-deploy/secrets.tpl}"
+
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+error() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info() { echo -e "${BLUE}$*${NC}"; }
+success() { echo -e "${GREEN}$*${NC}"; }
+
+cd "$PROJECT_DIR"
+
+show_usage() {
+    local app_name="${DEPLOYER_APP_NAME:-Application}"
+    echo "Usage: ./deploy/dep <command> <environment>"
+    echo ""
+    echo "Environments:"
+    echo "  prod     - Production"
+    echo "  staging  - Staging"
+    echo "  server   - Bootstrap (runs as root)"
+    echo ""
+    echo "Fresh server setup:"
+    echo "  ./deploy/dep setup:server server && ./deploy/dep setup:environment prod"
+    echo ""
+    echo "Regular deploys:"
+    echo "  ./deploy/dep deploy prod"
+    echo "  ./deploy/dep deploy staging"
+    echo ""
+    echo "Multi-environment commands:"
+    echo "  ./deploy/dep caddy:all     - Configure Caddy for all environments"
+    echo "  ./deploy/dep deploy:all    - Deploy to all environments"
+    exit 1
+}
+
+ENV=""
+COMMAND=""
+ARGS=()
+ENVIRONMENTS="${DEPLOYER_ENVIRONMENTS:-prod staging server}"
+
+for arg in "$@"; do
+    for env in $ENVIRONMENTS; do
+        if [[ "$arg" == "$env" ]]; then
+            ENV="$arg"
+            break
+        fi
+    done
+    if [[ -z "$COMMAND" && "$arg" != -* ]]; then
+        COMMAND="$arg"
+    fi
+    ARGS+=("$arg")
+done
+
+if [[ "$COMMAND" == "caddy:all" || "$COMMAND" == "deploy:all" ]]; then
+    ENV="all"
+fi
+
+[[ -z "$ENV" ]] && show_usage
+
+DEPLOYER_ENV="$ENV"
+[[ "$ENV" == "server" || "$ENV" == "all" ]] && DEPLOYER_ENV="prod"
+
+if [[ ! -f "$SECRETS_FILE" ]]; then
+    error "Secrets file not found: $SECRETS_FILE\nCreate it or set DEPLOYER_SECRETS_FILE env var"
+fi
+
+command -v op >/dev/null 2>&1 || error "1Password CLI (op) not installed.\nInstall: brew install 1password-cli"
+command -v gh >/dev/null 2>&1 || error "GitHub CLI (gh) not installed.\nInstall: brew install gh"
+
+if ! op account list &>/dev/null 2>&1; then
+    info "Signing in to 1Password..."
+    eval "$(op signin)"
+fi
+
+if ! gh auth status &>/dev/null 2>&1; then
+    info "Authenticating with GitHub..."
+    gh auth login
+fi
+
+info "Environment: $DEPLOYER_ENV"
+export DEPLOYER_ENV
+
+run_deployer() {
+    op run --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
+}
+
+PROD_ENVS="${DEPLOYER_PROD_ENVIRONMENTS:-prod staging}"
+
+case "$COMMAND" in
+    caddy:all)
+        i=1
+        total=$(echo $PROD_ENVS | wc -w | tr -d ' ')
+        for env in $PROD_ENVS; do
+            success "[$i/$total] Configuring Caddy for $env..."
+            run_deployer caddy:configure $env -v
+            echo ""
+            ((i++))
+        done
+        success "Caddy configured for all environments"
+        ;;
+    deploy:all)
+        i=1
+        total=$(echo $PROD_ENVS | wc -w | tr -d ' ')
+        for env in $PROD_ENVS; do
+            success "[$i/$total] Deploying $env..."
+            run_deployer deploy $env -v
+            echo ""
+            ((i++))
+        done
+        success "Deployed to all environments"
+        ;;
+    *)
+        run_deployer "${ARGS[@]}"
+        ;;
+esac

@@ -6,6 +6,9 @@ require __DIR__ . '/helpers.php';
 require __DIR__ . '/tasks/env.php';
 require __DIR__ . '/tasks/npm.php';
 require __DIR__ . '/tasks/services.php';
+require __DIR__ . '/tasks/github.php';
+require __DIR__ . '/tasks/verify.php';
+require __DIR__ . '/tasks/storage.php';
 require __DIR__ . '/provision/bootstrap.php';
 require __DIR__ . '/provision/firewall.php';
 require __DIR__ . '/provision/php.php';
@@ -41,11 +44,30 @@ task('provision:stack', [
     'provision:postgres',
 ]);
 
-// Ensure home directory is traversable by web servers
 desc('Ensure home directory is traversable');
 task('deploy:fix-permissions', function () {
     run('chmod 755 $HOME');
 });
+
+desc('Setup server from scratch (bootstrap + add deploy key)');
+task('setup:server', [
+    'provision:bootstrap',
+    'github:deploy-key',
+])->oncePerNode();
+
+desc('Provision and deploy an environment');
+task('setup:environment', [
+    'provision:all',
+    'caddy:configure',
+    'deploy',
+]);
+
+desc('Setup all environments (provision:all + caddy for prod & staging + deploy all)');
+task('setup:all', function () {
+    info('Setting up all environments...');
+})->oncePerNode();
+
+after('setup:all', 'provision:all');
 
 before('deploy:shared', 'deploy:env');
 before('deploy:symlink', 'deploy:fix-permissions');
@@ -55,3 +77,6 @@ after('deploy:vendors', 'npm:install');
 after('npm:install', 'npm:build');
 after('deploy:symlink', 'php-fpm:restart');
 after('deploy:symlink', 'artisan:up');
+after('artisan:storage:link', 'storage:link-custom');
+after('deploy:symlink', 'deploy:verify');
+fail('deploy', 'deploy:unlock');

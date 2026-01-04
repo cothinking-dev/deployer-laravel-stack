@@ -71,3 +71,40 @@ function getSecret(string $key): string
 
     return $secrets[$key];
 }
+
+/**
+ * @param array<string> $required
+ * @param array<string, mixed> $optional
+ * @return array<string, mixed>
+ * @throws \RuntimeException If required secrets are missing
+ */
+function requireSecrets(array $required, array $optional = []): array
+{
+    $missing = [];
+    $secrets = [];
+
+    foreach ($required as $var) {
+        $value = getenv($var);
+        if ($value === false || $value === '') {
+            $missing[] = $var;
+        } else {
+            $key = strtolower(str_replace('DEPLOYER_', '', $var));
+            $secrets[$key] = $value;
+        }
+    }
+
+    if (! empty($missing)) {
+        throw new \RuntimeException(
+            'Missing required secrets: ' . implode(', ', $missing) . "\n" .
+            'Run deployment via: ./deploy/dep <command> <environment>'
+        );
+    }
+
+    foreach ($optional as $var => $default) {
+        $value = getenv($var);
+        $key = strtolower(str_replace('DEPLOYER_', '', $var));
+        $secrets[$key] = ($value !== false && $value !== '') ? $value : $default;
+    }
+
+    return $secrets;
+}
