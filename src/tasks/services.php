@@ -159,7 +159,7 @@ task('queue:setup', function () {
     }
 
     $numProcs = get('queue_worker_processes', 2);
-    $deployPath = run('echo $HOME') . '/' . basename(get('deploy_path'));
+    $deployPath = run('echo $HOME').'/'.basename(get('deploy_path'));
 
     $config = <<<CONF
 [program:{$workerName}]
@@ -184,10 +184,19 @@ CONF;
         return;
     }
 
-    run('echo ' . escapeshellarg($config) . " | sudo tee {$configPath}");
-    run('sudo supervisorctl reread');
-    run('sudo supervisorctl update');
+    sudo('tee '.$configPath.' > /dev/null <<EOF
+'.$config.'
+EOF');
+    sudo('supervisorctl reread');
+    sudo('supervisorctl update');
     info("Queue worker {$workerName} configured successfully");
+});
+
+desc('Reload supervisor configuration (reread + update)');
+task('queue:reload', function () {
+    sudo('supervisorctl reread');
+    sudo('supervisorctl update');
+    info('Supervisor configuration reloaded');
 });
 
 desc('Restart queue workers via supervisor');
@@ -198,7 +207,14 @@ task('queue:restart', function () {
         return;
     }
 
-    run("sudo supervisorctl restart {$workerName}:* 2>/dev/null || echo 'Queue worker not configured'");
+    try {
+        sudo("supervisorctl restart {$workerName}:*");
+        info('Queue workers restarted');
+    } catch (\Throwable) {
+        // Worker may not be configured yet - try reloading supervisor
+        sudo('supervisorctl reread');
+        sudo('supervisorctl update');
+    }
 });
 
 desc('Show queue worker status');
@@ -211,8 +227,12 @@ task('queue:status', function () {
         return;
     }
 
-    $status = run("sudo supervisorctl status {$workerName}:* 2>/dev/null || echo 'Queue workers not configured'");
-    writeln($status);
+    try {
+        $status = sudo("supervisorctl status {$workerName}:*");
+        writeln($status);
+    } catch (\Throwable) {
+        warning('Queue workers not configured. Run: dep queue:setup <environment>');
+    }
 });
 
 desc('Stop queue workers');
@@ -223,8 +243,12 @@ task('queue:stop', function () {
         return;
     }
 
-    run("sudo supervisorctl stop {$workerName}:* 2>/dev/null || true");
-    info('Queue workers stopped');
+    try {
+        sudo("supervisorctl stop {$workerName}:*");
+        info('Queue workers stopped');
+    } catch (\Throwable) {
+        // Worker may not be configured
+    }
 });
 
 desc('Start queue workers');
@@ -235,6 +259,10 @@ task('queue:start', function () {
         return;
     }
 
-    run("sudo supervisorctl start {$workerName}:* 2>/dev/null || true");
-    info('Queue workers started');
+    try {
+        sudo("supervisorctl start {$workerName}:*");
+        info('Queue workers started');
+    } catch (\Throwable) {
+        // Worker may not be configured
+    }
 });
