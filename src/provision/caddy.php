@@ -81,8 +81,9 @@ CADDY;
 
     sudo('mkdir -p /etc/caddy/sites-enabled');
 
-    run('echo ' . escapeshellarg($siteConfig) . ' > /tmp/caddy-site.conf');
-    sudo("mv /tmp/caddy-site.conf /etc/caddy/sites-enabled/{$safeDomain}.conf");
+    $tmpFile = "/tmp/caddy-{$safeDomain}.conf";
+    run('echo ' . escapeshellarg($siteConfig) . " > {$tmpFile}");
+    sudo("mv {$tmpFile} /etc/caddy/sites-enabled/{$safeDomain}.conf");
     sudo("caddy fmt --overwrite /etc/caddy/sites-enabled/{$safeDomain}.conf");
 
     $mainCaddyfile = trim(sudo('cat /etc/caddy/Caddyfile 2>/dev/null || echo ""'));
