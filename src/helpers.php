@@ -2,10 +2,6 @@
 
 namespace Deployer;
 
-use function Deployer\get;
-use function Deployer\has;
-use function Deployer\run;
-
 /**
  * @throws \RuntimeException If no sudo password is configured
  */
@@ -24,7 +20,7 @@ function sudo(string $command): string
 }
 
 /**
- * @param array<string, mixed> $env
+ * @param  array<string, mixed>  $env
  */
 function envToString(array $env): string
 {
@@ -42,7 +38,7 @@ function envToString(array $env): string
         $value = (string) $value;
 
         if (preg_match('/[\s#"\'\$]/', $value) || $value === '') {
-            $value = '"' . addslashes($value) . '"';
+            $value = '"'.addslashes($value).'"';
         }
 
         $content .= "{$key}={$value}\n";
@@ -73,10 +69,12 @@ function getSecret(string $key): string
 }
 
 /**
- * @param array<string> $required
- * @param array<string, mixed> $optional
- * @return array<string, mixed>
+ * @param  array<string>  $required
+ * @param  array<string, mixed>  $optional
+ *
  * @throws \RuntimeException If required secrets are missing
+ *
+ * @return array<string, mixed>
  */
 function requireSecrets(array $required, array $optional = []): array
 {
@@ -95,7 +93,7 @@ function requireSecrets(array $required, array $optional = []): array
 
     if (! empty($missing)) {
         throw new \RuntimeException(
-            'Missing required secrets: ' . implode(', ', $missing) . "\n" .
+            'Missing required secrets: '.implode(', ', $missing)."\n".
             'Run deployment via: ./deploy/dep <command> <environment>'
         );
     }
@@ -107,4 +105,56 @@ function requireSecrets(array $required, array $optional = []): array
     }
 
     return $secrets;
+}
+
+/**
+ * Define an environment with sensible defaults.
+ *
+ * @param  array<string, mixed>  $config
+ */
+function environment(string $name, array $config): void
+{
+    $defaults = [
+        'app_env' => $name === 'prod' ? 'production' : $name,
+        'app_debug' => false,
+        'log_level' => 'error',
+        'tls_mode' => 'internal',
+    ];
+
+    $config = array_merge($defaults, $config);
+    $hostname = get('server_hostname');
+
+    host($name)
+        ->setHostname($hostname)
+        ->set('remote_user', 'deployer')
+        ->set('labels', ['stage' => $name])
+        ->set('url', "https://{$config['domain']}")
+        ->set('deploy_path', $config['deploy_path'])
+        ->set('domain', $config['domain'])
+        ->set('db_name', $config['db_name'])
+        ->set('redis_db', $config['redis_db'])
+        ->set('app_env', $config['app_env'])
+        ->set('app_debug', $config['app_debug'])
+        ->set('log_level', $config['log_level'])
+        ->set('tls_mode', $config['tls_mode'])
+        ->set('env_overrides', $config['env'] ?? []);
+}
+
+/**
+ * Resolve secret placeholders in env values.
+ *
+ * @param  array<string, mixed>  $env
+ * @return array<string, mixed>
+ */
+function resolveSecrets(array $env): array
+{
+    $secrets = has('secrets') ? get('secrets') : [];
+
+    return array_map(function ($value) use ($secrets) {
+        if (is_string($value) && preg_match('/^\{(\w+)\}$/', $value, $matches)) {
+            return $secrets[$matches[1]] ?? $value;
+        }
+
+        return $value;
+    }, $env);
 }

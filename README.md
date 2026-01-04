@@ -77,7 +77,7 @@ Edit `deploy.php` and update:
 
 - `application` - Your app name
 - `repository` - Your GitHub repo URL
-- `$serverHostname` - Your server hostname/IP
+- `server_hostname` - Your server hostname/IP
 - Environment domains, database names, etc.
 
 ### 4. Deploy
@@ -104,12 +104,152 @@ After setup, your project should have:
 
 ```
 your-project/
-├── deploy.php                    # Main deployer config (user modifies this)
+├── deploy.php                    # Main deployer config (single file, human-readable)
 └── deploy/
     ├── dep                       # Thin wrapper (delegates to recipe's bin/dep)
-    ├── secrets.tpl               # 1Password secret references
-    └── config/
-        └── env-extras.php        # Additional .env variables per environment
+    └── secrets.tpl               # 1Password secret references
+```
+
+## Configuration
+
+### deploy.php Structure
+
+The config is organized into clearly labeled sections:
+
+```php
+<?php
+
+namespace Deployer;
+
+require 'recipe/laravel.php';
+require 'vendor/cothinking-dev/deployer-laravel-stack/src/recipe.php';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Application
+// ─────────────────────────────────────────────────────────────────────────────
+
+set('application', 'My Application');
+set('repository', 'git@github.com:your-org/your-repo.git');
+set('keep_releases', 5);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server
+// ─────────────────────────────────────────────────────────────────────────────
+
+set('server_hostname', getenv('DEPLOYER_HOST') ?: 'your-server.example.com');
+
+host('server')
+    ->setHostname(get('server_hostname'))
+    ->set('remote_user', 'root')
+    ->set('labels', ['stage' => 'server'])
+    ->set('deploy_path', '~/myapp');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared Resources
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Laravel recipe already sets storage and .env
+// Add any custom shared directories here:
+// add('shared_dirs', ['custom-uploads']);
+// add('writable_dirs', ['custom-uploads']);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Secrets (from 1Password via environment)
+// ─────────────────────────────────────────────────────────────────────────────
+
+set('secrets', fn () => requireSecrets(
+    required: ['DEPLOYER_SUDO_PASS', 'DEPLOYER_DB_PASSWORD', 'DEPLOYER_APP_KEY'],
+    optional: ['DEPLOYER_STRIPE_KEY' => '']
+));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Environments
+// ─────────────────────────────────────────────────────────────────────────────
+
+environment('prod', [
+    'deploy_path' => '~/myapp',
+    'domain'      => 'myapp.example.com',
+    'db_name'     => 'myapp',
+    'redis_db'    => 0,
+    'env'         => [
+        'GTM_ID' => 'GTM-XXXXXXX',
+    ],
+]);
+
+environment('staging', [
+    'deploy_path' => '~/myapp-staging',
+    'domain'      => 'staging.myapp.example.com',
+    'db_name'     => 'myapp_staging',
+    'redis_db'    => 1,
+    'app_debug'   => true,
+    'log_level'   => 'debug',
+    'env'         => [
+        'GTM_ID' => '',
+    ],
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared Environment Variables
+// ─────────────────────────────────────────────────────────────────────────────
+
+set('shared_env', [
+    'FILESYSTEM_DISK' => 'local',
+    'MAIL_MAILER'     => 'smtp',
+    'STRIPE_KEY'      => '{stripe_key}',  // References secrets['stripe_key']
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Queue Workers (optional)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// set('queue_worker_name', fn () => 'myapp-' . getStage() . '-worker');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hooks
+// ─────────────────────────────────────────────────────────────────────────────
+
+after('deploy:failed', 'deploy:unlock');
+```
+
+### Environment Helper
+
+The `environment()` helper creates hosts with sensible defaults:
+
+```php
+environment('prod', [
+    'deploy_path' => '~/myapp',      // Required
+    'domain'      => 'myapp.com',    // Required
+    'db_name'     => 'myapp',        // Required
+    'redis_db'    => 0,              // Required
+    'app_debug'   => false,          // Default: false (true for non-prod)
+    'log_level'   => 'error',        // Default: 'error'
+    'tls_mode'    => 'internal',     // Default: 'internal'
+    'env'         => [],             // Per-environment .env overrides
+]);
+```
+
+### Secret Placeholders
+
+Use `{secret_key}` syntax in `shared_env` to reference secrets:
+
+```php
+set('secrets', fn () => requireSecrets(
+    required: ['DEPLOYER_SUDO_PASS', 'DEPLOYER_DB_PASSWORD', 'DEPLOYER_APP_KEY'],
+    optional: ['DEPLOYER_STRIPE_KEY' => '']  // Maps to secrets['stripe_key']
+));
+
+set('shared_env', [
+    'STRIPE_KEY' => '{stripe_key}',  // Resolved from secrets['stripe_key']
+]);
+```
+
+### Secrets (deploy/secrets.tpl)
+
+```bash
+DEPLOYER_SUDO_PASS=op://Vault/Server/sudo-password
+DEPLOYER_DB_PASSWORD=op://Vault/Server/db-password
+DEPLOYER_APP_KEY=op://Vault/App/laravel-key
+DEPLOYER_STRIPE_KEY=op://Vault/Stripe/secret-key
 ```
 
 ## Multi-Environment Setup
@@ -119,7 +259,6 @@ Prod and staging are **separate deployments** on the same server:
 | Setting     | prod        | staging             |
 | ----------- | ----------- | ------------------- |
 | Deploy path | `~/myapp`   | `~/myapp-staging`   |
-| Branch      | `main`      | `staging`           |
 | Database    | `myapp`     | `myapp_staging`     |
 | Redis DB    | `0`         | `1`                 |
 | Domain      | `myapp.com` | `staging.myapp.com` |
@@ -203,12 +342,31 @@ The second `setup:environment` is fast - provisioning tasks are idempotent and s
 | `./deploy/dep redis:status prod`    | Show Redis status      |
 | `./deploy/dep postgres:status prod` | Show PostgreSQL status |
 
+### Queue Workers
+
+| Command                          | Description                      |
+| -------------------------------- | -------------------------------- |
+| `./deploy/dep queue:setup prod`  | Create Supervisor config         |
+| `./deploy/dep queue:status prod` | Show queue worker status         |
+| `./deploy/dep queue:restart prod`| Restart queue workers            |
+| `./deploy/dep queue:stop prod`   | Stop queue workers               |
+| `./deploy/dep queue:start prod`  | Start queue workers              |
+
 ### Database
 
 | Command                               | Description              |
 | ------------------------------------- | ------------------------ |
 | `./deploy/dep db:check prod`          | Test database connection |
 | `./deploy/dep postgres:list-dbs prod` | List all databases       |
+
+### Environment
+
+| Command                          | Description                         |
+| -------------------------------- | ----------------------------------- |
+| `./deploy/dep env:show prod`     | Show .env (secrets masked)          |
+| `./deploy/dep env:backups prod`  | List .env backups                   |
+| `./deploy/dep env:restore prod`  | Restore .env from backup            |
+| `./deploy/dep deploy:env:force prod` | Force regenerate .env           |
 
 ### GitHub
 
@@ -225,118 +383,6 @@ The second `setup:environment` is fast - provisioning tasks are idempotent and s
 | `./deploy/dep app:status prod`         | Show deployment status |
 | `./deploy/dep ssh prod`                | SSH into server        |
 | `./deploy/dep deploy:verify prod`      | Run HTTP health check  |
-
-## Configuration
-
-### deploy.php Example
-
-```php
-<?php
-
-namespace Deployer;
-
-require 'recipe/laravel.php';
-require 'vendor/cothinking-dev/deployer-laravel-stack/src/recipe.php';
-
-set('application', 'My App');
-set('repository', 'git@github.com:org/repo.git');
-set('keep_releases', 5);
-
-// Secrets from 1Password (via deploy/dep wrapper)
-set('secrets', function () {
-    return requireSecrets(
-        ['DEPLOYER_SUDO_PASS', 'DEPLOYER_DB_PASSWORD', 'DEPLOYER_APP_KEY'],
-        ['DEPLOYER_OPTIONAL_SECRET' => '']  // Optional with default
-    );
-});
-
-$serverHostname = 'your-server.com';
-
-// Bootstrap host (root access for initial setup)
-host('server')
-    ->setHostname($serverHostname)
-    ->set('remote_user', 'root')
-    ->set('labels', ['stage' => 'server']);
-
-// Environment defaults
-$defaults = [
-    'tls_mode' => 'internal',  // 'internal' for Cloudflare, 'acme' for Let's Encrypt
-    'app_debug' => 'false',
-    'log_level' => 'error',
-];
-
-// Define environments
-$environments = [
-    'prod' => [
-        'deploy_path' => '~/myapp',
-        'branch' => 'main',
-        'domain' => 'myapp.com',
-        'db_name' => 'myapp',
-        'redis_db' => '0',
-        'app_env' => 'production',
-    ],
-    'staging' => [
-        'deploy_path' => '~/myapp-staging',
-        'branch' => 'staging',
-        'domain' => 'staging.myapp.com',
-        'db_name' => 'myapp_staging',
-        'redis_db' => '1',
-        'app_env' => 'staging',
-        'app_debug' => 'true',
-        'log_level' => 'debug',
-    ],
-];
-
-foreach ($environments as $name => $config) {
-    $merged = array_merge($defaults, $config);
-
-    host($name)
-        ->setHostname($serverHostname)
-        ->set('remote_user', 'deployer')
-        ->set('labels', ['stage' => $name])
-        ->set('url', "https://{$merged['domain']}")
-        ->set('deploy_path', $merged['deploy_path'])
-        ->set('branch', $merged['branch'])
-        ->set('domain', $merged['domain'])
-        ->set('db_name', $merged['db_name'])
-        ->set('redis_db', $merged['redis_db'])
-        ->set('app_env', $merged['app_env'])
-        ->set('app_debug', $merged['app_debug'])
-        ->set('log_level', $merged['log_level'])
-        ->set('tls_mode', $merged['tls_mode']);
-}
-```
-
-### Environment Extras (deploy/config/env-extras.php)
-
-Add custom .env variables per environment:
-
-```php
-<?php
-
-return [
-    'common' => [
-        'MAIL_MAILER' => 'smtp',
-        'MAIL_FROM_ADDRESS' => 'hello@example.com',
-    ],
-    'prod' => [
-        'GTM_ID' => 'GTM-XXXXXXX',
-        'STRIPE_KEY' => '{stripe_key}',  // References secrets['stripe_key']
-    ],
-    'staging' => [
-        'GTM_ID' => '',
-    ],
-];
-```
-
-### Secrets (deploy/secrets.tpl)
-
-```bash
-DEPLOYER_SUDO_PASS=op://Vault/Server/sudo-password
-DEPLOYER_DB_PASSWORD=op://Vault/Server/db-password
-DEPLOYER_APP_KEY=op://Vault/App/laravel-key
-DEPLOYER_STRIPE_KEY=op://Vault/Stripe/secret-key
-```
 
 ## TLS Modes
 
@@ -416,6 +462,42 @@ ssh root@your-server "sudo -u postgres psql -c \"ALTER USER deployer WITH PASSWO
 # Manual health check
 curl -I https://your-domain.com
 ```
+
+## Upgrading from v2.x (env-extras.php)
+
+If you're upgrading from a version that used `deploy/config/env-extras.php`:
+
+1. Move your env vars from `env-extras.php` into `deploy.php`:
+
+   **Before (`deploy/config/env-extras.php`):**
+   ```php
+   return [
+       'common' => ['MAIL_MAILER' => 'smtp'],
+       'prod' => ['GTM_ID' => 'GTM-XXX'],
+       'staging' => ['GTM_ID' => ''],
+   ];
+   ```
+
+   **After (`deploy.php`):**
+   ```php
+   set('shared_env', [
+       'MAIL_MAILER' => 'smtp',
+   ]);
+
+   environment('prod', [
+       // ... other config
+       'env' => ['GTM_ID' => 'GTM-XXX'],
+   ]);
+
+   environment('staging', [
+       // ... other config
+       'env' => ['GTM_ID' => ''],
+   ]);
+   ```
+
+2. Delete `deploy/config/env-extras.php` and the `deploy/config/` directory.
+
+3. Replace the `foreach ($environments)` loop with `environment()` calls.
 
 ## License
 

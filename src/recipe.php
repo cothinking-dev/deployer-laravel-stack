@@ -2,21 +2,22 @@
 
 namespace Deployer;
 
-require __DIR__ . '/tasks/env.php';
-require __DIR__ . '/tasks/npm.php';
-require __DIR__ . '/tasks/services.php';
-require __DIR__ . '/tasks/github.php';
-require __DIR__ . '/tasks/verify.php';
-require __DIR__ . '/tasks/storage.php';
-require __DIR__ . '/provision/bootstrap.php';
-require __DIR__ . '/provision/firewall.php';
-require __DIR__ . '/provision/php.php';
-require __DIR__ . '/provision/composer.php';
-require __DIR__ . '/provision/node.php';
-require __DIR__ . '/provision/postgres.php';
-require __DIR__ . '/provision/redis.php';
-require __DIR__ . '/provision/caddy.php';
-require __DIR__ . '/provision/fail2ban.php';
+require_once __DIR__.'/helpers.php';
+require_once __DIR__.'/tasks/env.php';
+require __DIR__.'/tasks/npm.php';
+require __DIR__.'/tasks/services.php';
+require __DIR__.'/tasks/github.php';
+require __DIR__.'/tasks/verify.php';
+require __DIR__.'/tasks/storage.php';
+require __DIR__.'/provision/bootstrap.php';
+require __DIR__.'/provision/firewall.php';
+require __DIR__.'/provision/php.php';
+require __DIR__.'/provision/composer.php';
+require __DIR__.'/provision/node.php';
+require __DIR__.'/provision/postgres.php';
+require __DIR__.'/provision/redis.php';
+require __DIR__.'/provision/caddy.php';
+require __DIR__.'/provision/fail2ban.php';
 
 set('php_version', '8.4');
 set('node_version', '22');

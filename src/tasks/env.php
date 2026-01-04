@@ -56,6 +56,20 @@ set('env_base', function () {
 
 set('env_safe_mode', true);
 
+/**
+ * Build the final .env array by merging base, shared, and per-environment overrides.
+ */
+function buildEnv(): array
+{
+    $base = get('env_base');
+    $shared = has('shared_env') ? get('shared_env') : [];
+    $overrides = has('env_overrides') ? get('env_overrides') : [];
+
+    $merged = array_merge($base, $shared, $overrides);
+
+    return resolveSecrets($merged);
+}
+
 desc('Generate .env file from Deployer configuration');
 task('deploy:env', function () {
     $path = '{{deploy_path}}/shared/.env';
@@ -69,24 +83,18 @@ task('deploy:env', function () {
         return;
     }
 
-    $baseEnv = get('env_base');
-    $extras = has('env_extras') ? get('env_extras') : [];
-
-    $env = array_merge($baseEnv, $extras);
+    $env = buildEnv();
     $content = envToString($env);
 
-    run('echo ' . escapeshellarg($content) . " > {$path}");
+    run('echo '.escapeshellarg($content)." > {$path}");
     run("chmod 640 {$path}");
 
-    info('Generated .env for: ' . getStage());
+    info('Generated .env for: '.getStage());
 });
 
 desc('Force regenerate .env file (overwrites existing)');
 task('deploy:env:force', function () {
-    $baseEnv = get('env_base');
-    $extras = has('env_extras') ? get('env_extras') : [];
-
-    $env = array_merge($baseEnv, $extras);
+    $env = buildEnv();
     $content = envToString($env);
 
     run('mkdir -p {{deploy_path}}/shared');
@@ -99,10 +107,10 @@ task('deploy:env:force', function () {
         info("Backed up existing .env to .env.backup.{$timestamp}");
     }
 
-    run('echo ' . escapeshellarg($content) . " > {$path}");
+    run('echo '.escapeshellarg($content)." > {$path}");
     run("chmod 640 {$path}");
 
-    info('Generated .env for: ' . getStage());
+    info('Generated .env for: '.getStage());
 });
 
 desc('Show current .env values (masked secrets)');
@@ -119,7 +127,7 @@ task('env:show', function () {
 
     $masked = preg_replace_callback(
         '/^(.*(?:KEY|SECRET|PASSWORD|TOKEN|CREDENTIALS).*)=(.+)$/mi',
-        fn ($m) => $m[1] . '=' . str_repeat('*', min(strlen($m[2]), 20)),
+        fn ($m) => $m[1].'='.str_repeat('*', min(strlen($m[2]), 20)),
         $content
     );
 
@@ -147,7 +155,7 @@ task('env:restore', function () {
     $backupFiles = array_filter(explode("\n", trim($backups)));
     writeln('Available backups:');
     foreach ($backupFiles as $i => $file) {
-        writeln("  [{$i}] " . basename($file));
+        writeln("  [{$i}] ".basename($file));
     }
 
     $choice = ask('Enter backup number to restore:', '0');
@@ -162,5 +170,5 @@ task('env:restore', function () {
     $timestamp = date('Y-m-d-His');
     run("cp {$path}/.env {$path}/.env.pre-restore.{$timestamp}");
     run("cp {$selectedBackup} {$path}/.env");
-    info('Restored from: ' . basename($selectedBackup));
+    info('Restored from: '.basename($selectedBackup));
 });
