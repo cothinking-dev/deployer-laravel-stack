@@ -11,18 +11,22 @@ set('verify_health_path', '/');
 set('verify_valid_codes', ['200', '301', '302', '303', '307', '308']);
 set('verify_timeout', 15);
 set('verify_wait', 2);
-set('verify_retries', 3);
+set('verify_retries', 10);
 set('verify_retry_delay', 2);
 set('verify_insecure', true); // Allow self-signed certs (for internal TLS)
 set('verify_check_body', true); // Check response body for errors
 set('verify_error_patterns', [
-    'Exception',
-    'Error',
-    'Fatal',
-    'Parse error',
-    'syntax error',
+    'Fatal error:',
+    'Parse error:',
+    'syntax error,',
+    'Uncaught Exception',
+    'Stack trace:',
+    'vendor/laravel/framework',
     '500 Internal Server Error',
-    'Service Unavailable',
+    '503 Service Unavailable',
+    'Whoops, looks like something went wrong',
+    'The stream or file',
+    'SQLSTATE[',
 ]);
 
 // Deep health checks (database, redis)
