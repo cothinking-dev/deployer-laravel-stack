@@ -54,7 +54,7 @@ set('env_base', function () {
     ];
 });
 
-set('env_safe_mode', true);
+set('env_safe_mode', false);
 
 // Required env vars that must have values (not empty, not placeholders)
 set('env_required', ['APP_KEY', 'DB_PASSWORD']);
@@ -141,7 +141,7 @@ task('deploy:env', function () {
 
             warning('Run deploy:env:force to regenerate, or fix manually.');
         } else {
-            info('.env exists and is valid (safe mode). Use deploy:env:force to overwrite.');
+            info('.env exists and is valid (safe mode). Skipping. Set env_safe_mode=false to overwrite.');
         }
 
         return;
