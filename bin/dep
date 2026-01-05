@@ -91,7 +91,23 @@ fi
 info "Environment: $DEPLOYER_ENV"
 export DEPLOYER_ENV
 
+# Warm up SSH connection before Deployer starts
+# This triggers 1Password/SSH agent authentication BEFORE Deployer's socket server starts
+warmup_ssh() {
+    local host="${DEPLOYER_HOST:-}"
+    [[ -z "$host" ]] && return 0  # Skip if no host configured
+
+    # Try BatchMode first (succeeds if already authenticated)
+    if ssh -o ConnectTimeout=30 -o BatchMode=yes "$host" "echo ok" &>/dev/null; then
+        return 0
+    fi
+    # If BatchMode fails (needs auth), run interactively to trigger 1Password/Touch ID
+    info "Warming up SSH connection..."
+    ssh -o ConnectTimeout=30 "$host" "echo ok" &>/dev/null || true
+}
+
 run_deployer() {
+    warmup_ssh
     op run --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
 }
 
