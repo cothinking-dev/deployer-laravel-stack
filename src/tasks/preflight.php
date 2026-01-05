@@ -8,9 +8,7 @@ set('preflight_memory_threshold_mb', 512); // 512MB minimum available memory
 set('preflight_enabled', true);
 
 /**
- * Pre-flight check results tracking.
- *
- * @var array<string, array{passed: bool, message: string}>
+ * Pre-flight check result handler.
  */
 function preflightCheck(string $name, bool $passed, string $message): void
 {
@@ -19,6 +17,26 @@ function preflightCheck(string $name, bool $passed, string $message): void
     } else {
         throw new \RuntimeException("[FAIL] {$name}: {$message}");
     }
+}
+
+/**
+ * Parse batched preflight results from remote script output.
+ *
+ * @return array<string, array{status: string, message: string}>
+ */
+function parsePreflightResults(string $output): array
+{
+    $results = [];
+    foreach (explode("\n", trim($output)) as $line) {
+        if (preg_match('/^PREFLIGHT\|([^|]+)\|([^|]+)\|(.*)$/', $line, $matches)) {
+            $results[$matches[1]] = [
+                'status' => $matches[2],
+                'message' => $matches[3],
+            ];
+        }
+    }
+
+    return $results;
 }
 
 desc('Run all pre-flight checks before deployment');
@@ -32,97 +50,116 @@ task('deploy:preflight', function () {
     info('Running pre-flight checks...');
     writeln('');
 
-    // Track if any checks fail
     $stage = getStage();
-
-    // 1. Check PHP-FPM is running
     $phpVersion = get('php_version', '8.4');
-    $fpmStatus = run("systemctl is-active php{$phpVersion}-fpm 2>/dev/null || echo 'inactive'");
-
-    preflightCheck(
-        'PHP-FPM',
-        trim($fpmStatus) === 'active',
-        trim($fpmStatus) === 'active'
-            ? "php{$phpVersion}-fpm is running"
-            : "php{$phpVersion}-fpm is not running. Start with: sudo systemctl start php{$phpVersion}-fpm"
-    );
-
-    // 2. Check Redis is running
-    $redisStatus = run("systemctl is-active redis-server 2>/dev/null || echo 'inactive'");
-
-    preflightCheck(
-        'Redis',
-        trim($redisStatus) === 'active',
-        trim($redisStatus) === 'active'
-            ? 'redis-server is running'
-            : 'redis-server is not running. Start with: sudo systemctl start redis-server'
-    );
-
-    // 3. Check PostgreSQL is running
-    $pgStatus = run("systemctl is-active postgresql 2>/dev/null || echo 'inactive'");
-
-    preflightCheck(
-        'PostgreSQL',
-        trim($pgStatus) === 'active',
-        trim($pgStatus) === 'active'
-            ? 'postgresql is running'
-            : 'postgresql is not running. Start with: sudo systemctl start postgresql'
-    );
-
-    // 4. Check disk space
-    $thresholdMb = get('preflight_disk_threshold_mb', 1024);
+    $diskThreshold = get('preflight_disk_threshold_mb', 1024);
+    $memThreshold = get('preflight_memory_threshold_mb', 512);
     $deployPath = get('deploy_path');
+    $domain = get('domain', '');
 
-    // Get available disk space in MB
-    $diskOutput = run("df -BM {$deployPath} 2>/dev/null | tail -1 | awk '{print \$4}' | tr -d 'M'");
-    $availableMb = (int) trim($diskOutput);
+    // Build batched remote script - single SSH call for all system checks
+    $remoteScript = <<<BASH
+#!/bin/bash
+# Batched preflight checks - outputs structured results
 
-    preflightCheck(
-        'Disk Space',
-        $availableMb >= $thresholdMb,
-        $availableMb >= $thresholdMb
-            ? "Available: {$availableMb}MB (threshold: {$thresholdMb}MB)"
-            : "Only {$availableMb}MB available, need at least {$thresholdMb}MB. Free up disk space before deploying."
-    );
+# PHP-FPM check
+fpm_status=\$(systemctl is-active php{$phpVersion}-fpm 2>/dev/null || echo 'inactive')
+if [[ "\$fpm_status" == "active" ]]; then
+    echo "PREFLIGHT|PHP-FPM|PASS|php{$phpVersion}-fpm is running"
+else
+    echo "PREFLIGHT|PHP-FPM|FAIL|php{$phpVersion}-fpm is not running. Start with: sudo systemctl start php{$phpVersion}-fpm"
+fi
 
-    // 5. Check available memory
-    $memThresholdMb = get('preflight_memory_threshold_mb', 512);
-    $memOutput = run("free -m | awk '/^Mem:/ {print \$7}'");
-    $availableMemMb = (int) trim($memOutput);
+# Redis service check
+redis_status=\$(systemctl is-active redis-server 2>/dev/null || echo 'inactive')
+if [[ "\$redis_status" == "active" ]]; then
+    echo "PREFLIGHT|Redis|PASS|redis-server is running"
+else
+    echo "PREFLIGHT|Redis|FAIL|redis-server is not running. Start with: sudo systemctl start redis-server"
+fi
 
-    preflightCheck(
-        'Memory',
-        $availableMemMb >= $memThresholdMb,
-        $availableMemMb >= $memThresholdMb
-            ? "Available: {$availableMemMb}MB (threshold: {$memThresholdMb}MB)"
-            : "Only {$availableMemMb}MB available, need at least {$memThresholdMb}MB. Close applications or add swap."
-    );
+# PostgreSQL check
+pg_status=\$(systemctl is-active postgresql 2>/dev/null || echo 'inactive')
+if [[ "\$pg_status" == "active" ]]; then
+    echo "PREFLIGHT|PostgreSQL|PASS|postgresql is running"
+else
+    echo "PREFLIGHT|PostgreSQL|FAIL|postgresql is not running. Start with: sudo systemctl start postgresql"
+fi
 
-    // 6. Check deploy path is writable
-    $parentPath = dirname(str_replace('~', run('echo $HOME'), $deployPath));
+# Disk space check
+disk_available=\$(df -BM {$deployPath} 2>/dev/null | tail -1 | awk '{print \$4}' | tr -d 'M')
+if [[ "\$disk_available" -ge {$diskThreshold} ]]; then
+    echo "PREFLIGHT|Disk Space|PASS|Available: \${disk_available}MB (threshold: {$diskThreshold}MB)"
+else
+    echo "PREFLIGHT|Disk Space|FAIL|Only \${disk_available}MB available, need at least {$diskThreshold}MB"
+fi
 
-    if (test("[ -d {$deployPath} ]")) {
-        $writable = test("[ -w {$deployPath} ]");
-        preflightCheck(
-            'Deploy Path',
-            $writable,
-            $writable
-                ? "Deploy path {$deployPath} is writable"
-                : "Deploy path {$deployPath} is not writable. Fix with: chmod 755 {$deployPath}"
-        );
-    } else {
-        // Path doesn't exist, check parent is writable
-        $parentWritable = test("[ -w {$parentPath} ]");
-        preflightCheck(
-            'Deploy Path',
-            $parentWritable,
-            $parentWritable
-                ? "Deploy path will be created in {$parentPath}"
-                : "Cannot create deploy path - parent {$parentPath} is not writable"
-        );
+# Memory check
+mem_available=\$(free -m | awk '/^Mem:/ {print \$7}')
+if [[ "\$mem_available" -ge {$memThreshold} ]]; then
+    echo "PREFLIGHT|Memory|PASS|Available: \${mem_available}MB (threshold: {$memThreshold}MB)"
+else
+    echo "PREFLIGHT|Memory|FAIL|Only \${mem_available}MB available, need at least {$memThreshold}MB"
+fi
+
+# Deploy path check
+deploy_path="{$deployPath}"
+parent_path=\$(dirname "\$deploy_path")
+if [[ -d "\$deploy_path" ]]; then
+    if [[ -w "\$deploy_path" ]]; then
+        echo "PREFLIGHT|Deploy Path|PASS|Deploy path \$deploy_path is writable"
+    else
+        echo "PREFLIGHT|Deploy Path|FAIL|Deploy path \$deploy_path is not writable"
+    fi
+else
+    if [[ -w "\$parent_path" ]]; then
+        echo "PREFLIGHT|Deploy Path|PASS|Deploy path will be created in \$parent_path"
+    else
+        echo "PREFLIGHT|Deploy Path|FAIL|Cannot create deploy path - parent \$parent_path is not writable"
+    fi
+fi
+
+# Redis connectivity check
+redis_ping=\$(redis-cli ping 2>/dev/null || echo 'fail')
+if [[ "\$redis_ping" == "PONG" ]]; then
+    echo "PREFLIGHT|Redis Connection|PASS|Redis responding to ping"
+else
+    echo "PREFLIGHT|Redis Connection|FAIL|Redis not responding"
+fi
+
+# Caddy check (if domain configured)
+if [[ -n "{$domain}" ]]; then
+    caddy_status=\$(systemctl is-active caddy 2>/dev/null || echo 'inactive')
+    if [[ "\$caddy_status" == "active" ]]; then
+        echo "PREFLIGHT|Caddy|PASS|Caddy web server is running"
+    else
+        echo "PREFLIGHT|Caddy|FAIL|Caddy is not running. Start with: sudo systemctl start caddy"
+    fi
+fi
+BASH;
+
+    // Execute batched checks in single SSH call
+    $output = run($remoteScript);
+    $results = parsePreflightResults($output);
+
+    // Process results
+    $requiredChecks = ['PHP-FPM', 'Redis', 'PostgreSQL', 'Disk Space', 'Memory', 'Deploy Path', 'Redis Connection'];
+    if ($domain) {
+        $requiredChecks[] = 'Caddy';
     }
 
-    // 7. Validate secrets don't contain unresolved placeholders
+    foreach ($requiredChecks as $check) {
+        if (! isset($results[$check])) {
+            throw new \RuntimeException("[FAIL] {$check}: Check did not return a result");
+        }
+
+        $result = $results[$check];
+        preflightCheck($check, $result['status'] === 'PASS', $result['message']);
+    }
+
+    // Local checks that can't be batched remotely
+
+    // Validate secrets don't contain unresolved placeholders
     $secrets = has('secrets') ? get('secrets') : [];
     $unresolvedSecrets = [];
 
@@ -140,7 +177,7 @@ task('deploy:preflight', function () {
             : 'Unresolved secret placeholders: ' . implode(', ', $unresolvedSecrets) . '. Check environment variables.'
     );
 
-    // 8. Check database connectivity
+    // Database connectivity check (requires secret handling)
     $dbName = get('db_name');
     $dbUser = get('db_username', 'deployer');
     $dbPass = $secrets['db_password'] ?? '';
@@ -154,31 +191,6 @@ task('deploy:preflight', function () {
             trim($dbCheck) === 'ok'
                 ? "Connected to database {$dbName}"
                 : "Cannot connect to database {$dbName}. Check credentials and that database exists."
-        );
-    }
-
-    // 9. Check Redis connectivity
-    $redisCheck = run("redis-cli ping 2>/dev/null || echo 'fail'");
-
-    preflightCheck(
-        'Redis Connection',
-        trim($redisCheck) === 'PONG',
-        trim($redisCheck) === 'PONG'
-            ? 'Redis responding to ping'
-            : 'Redis not responding. Check if redis-server is running and accessible.'
-    );
-
-    // 10. Check Caddy is running (if configured)
-    $domain = get('domain', '');
-    if ($domain) {
-        $caddyStatus = run("systemctl is-active caddy 2>/dev/null || echo 'inactive'");
-
-        preflightCheck(
-            'Caddy',
-            trim($caddyStatus) === 'active',
-            trim($caddyStatus) === 'active'
-                ? 'Caddy web server is running'
-                : 'Caddy is not running. Start with: sudo systemctl start caddy'
         );
     }
 
@@ -203,20 +215,22 @@ desc('Check all services status');
 task('preflight:services', function () {
     $phpVersion = get('php_version', '8.4');
 
-    writeln('Service Status:');
-    writeln('');
+    // Batch all service checks into single SSH call
+    $script = <<<BASH
+echo "Service Status:"
+echo ""
+for svc in "php{$phpVersion}-fpm:PHP-FPM {$phpVersion}" "redis-server:Redis" "postgresql:PostgreSQL" "caddy:Caddy"; do
+    name="\${svc%%:*}"
+    label="\${svc#*:}"
+    status=\$(systemctl is-active "\$name" 2>/dev/null || echo 'not installed')
+    if [[ "\$status" == "active" ]]; then
+        echo "  [OK] \$label: \$status"
+    else
+        echo "  [!!] \$label: \$status"
+    fi
+done
+BASH;
 
-    $services = [
-        "php{$phpVersion}-fpm" => "PHP-FPM {$phpVersion}",
-        'redis-server' => 'Redis',
-        'postgresql' => 'PostgreSQL',
-        'caddy' => 'Caddy',
-    ];
-
-    foreach ($services as $service => $name) {
-        $status = run("systemctl is-active {$service} 2>/dev/null || echo 'not installed'");
-        $statusText = trim($status);
-        $icon = $statusText === 'active' ? '[OK]' : '[!!]';
-        writeln("  {$icon} {$name}: {$statusText}");
-    }
+    $output = run($script);
+    writeln($output);
 });
