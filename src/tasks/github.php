@@ -79,6 +79,7 @@ task('github:generate-key', function () {
 
 /**
  * Configure SSH to use a specific key for a GitHub repo.
+ * Handles deduplication to prevent multiple identical entries.
  */
 function configureSshForRepo(string $repoPath, string $keyPath): void
 {
@@ -89,12 +90,32 @@ function configureSshForRepo(string $repoPath, string $keyPath): void
     // Create a unique host alias for this repo
     $hostAlias = 'github-' . str_replace('/', '-', $repoPath);
 
+    // Ensure .ssh directory exists with correct permissions
+    run("mkdir -p {$home}/.ssh && chmod 700 {$home}/.ssh");
+
     // Check if already configured
     $existingConfig = run("cat {$sshConfigPath} 2>/dev/null || echo ''");
-    if (str_contains($existingConfig, "Host {$hostAlias}")) {
-        info("SSH config already exists for {$hostAlias}");
 
-        return;
+    if (str_contains($existingConfig, "Host {$hostAlias}")) {
+        // Check if the existing config points to the same key
+        $existingKeyMatch = preg_match(
+            "/Host {$hostAlias}[^H]*IdentityFile ([^\n]+)/",
+            $existingConfig,
+            $matches
+        );
+
+        if ($existingKeyMatch && trim($matches[1]) === $keyPath) {
+            info("SSH config already exists and is correct for {$hostAlias}");
+
+            return;
+        }
+
+        // Key path is different, need to update the config
+        info("Updating SSH config for {$hostAlias} (key path changed)");
+
+        // Remove the old config block
+        $newConfig = removeSshHostBlock($existingConfig, $hostAlias);
+        run("echo " . escapeshellarg($newConfig) . " > {$sshConfigPath}");
     }
 
     $sshConfig = <<<SSH
@@ -113,8 +134,27 @@ SSH;
 
     info("SSH config added for {$hostAlias}");
 
+    // Validate the SSH config
+    $validateResult = run("ssh -G {$hostAlias} 2>&1 | grep -q 'hostname github.com' && echo 'VALID' || echo 'INVALID'");
+
+    if (trim($validateResult) !== 'VALID') {
+        warning("SSH config validation failed for {$hostAlias}. Check {$sshConfigPath}");
+    }
+
     // Update the repository URL to use the host alias
     info("NOTE: Update your repository URL to use: git@{$hostAlias}:{$repoPath}.git");
+}
+
+/**
+ * Remove an SSH host block from the config.
+ */
+function removeSshHostBlock(string $config, string $hostAlias): string
+{
+    // Pattern to match the entire Host block
+    // Matches from "Host {alias}" to the next "Host " or end of file
+    $pattern = "/\n?# Deploy key for [^\n]*\nHost {$hostAlias}\n(?:(?!Host ).)*\n?/s";
+
+    return preg_replace($pattern, "\n", $config);
 }
 
 desc('Add server deploy key to GitHub via gh CLI');

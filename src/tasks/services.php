@@ -5,8 +5,27 @@ namespace Deployer;
 desc('Restart PHP-FPM');
 task('php-fpm:restart', function () {
     $version = get('php_version', '8.4');
+
     sudo("systemctl restart php{$version}-fpm");
-    info("Restarted PHP {$version}-FPM");
+
+    // Wait for FPM to be ready
+    $maxAttempts = 10;
+    $attempt = 0;
+
+    while ($attempt < $maxAttempts) {
+        $status = run("systemctl is-active php{$version}-fpm 2>/dev/null || echo 'inactive'");
+
+        if (trim($status) === 'active') {
+            info("Restarted PHP {$version}-FPM (ready after " . ($attempt + 1) . " check(s))");
+
+            return;
+        }
+
+        $attempt++;
+        run('sleep 0.5');
+    }
+
+    throw new \RuntimeException("PHP {$version}-FPM failed to become active after restart");
 });
 
 desc('Show PHP-FPM status');
@@ -78,7 +97,13 @@ task('artisan:down', function () {
 
     $secret = get('maintenance_secret', bin2hex(random_bytes(16)));
     run("cd {{deploy_path}}/current && {{bin/php}} artisan down --secret={$secret} --retry=60");
-    info("Maintenance mode enabled (secret: {$secret})");
+
+    // Verify maintenance mode is active
+    if (test('[ -f {{deploy_path}}/current/storage/framework/down ]')) {
+        info("Maintenance mode enabled (secret: {$secret})");
+    } else {
+        warning('Maintenance mode file not found - mode may not be active');
+    }
 });
 
 desc('Bring application out of maintenance mode');
@@ -100,11 +125,26 @@ task('horizon:terminate', function () {
     }
 
     if (! test('[ -f {{deploy_path}}/current/artisan ]')) {
+        info('No current release found, skipping Horizon termination');
+
         return;
     }
 
-    run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:terminate 2>/dev/null || true');
-    info('Horizon workers terminating...');
+    try {
+        $result = run('cd {{deploy_path}}/current && {{bin/php}} artisan horizon:terminate 2>&1');
+        info('Horizon workers terminating...');
+
+        if (str_contains($result, 'error') || str_contains($result, 'Exception')) {
+            warning("Horizon terminate returned: {$result}");
+        }
+    } catch (\Throwable $e) {
+        // Horizon might not be running, which is okay
+        if (str_contains($e->getMessage(), 'not running') || str_contains($e->getMessage(), 'Connection refused')) {
+            info('Horizon not running, skipping termination');
+        } else {
+            warning('Horizon terminate failed: ' . $e->getMessage());
+        }
+    }
 });
 
 desc('Check Horizon status');
@@ -207,13 +247,38 @@ task('queue:restart', function () {
         return;
     }
 
-    try {
-        sudo("supervisorctl restart {$workerName}:*");
-        info('Queue workers restarted');
-    } catch (\Throwable) {
-        // Worker may not be configured yet - try reloading supervisor
+    // First check if supervisor is installed
+    if (! test('[ -x /usr/bin/supervisorctl ]')) {
+        warning('Supervisor not installed, skipping queue restart');
+
+        return;
+    }
+
+    // Check if the worker is configured
+    $workerExists = run("supervisorctl status {$workerName}:* 2>&1 || echo 'NOT_FOUND'");
+
+    if (str_contains($workerExists, 'NOT_FOUND') || str_contains($workerExists, 'no such')) {
+        info("Queue worker {$workerName} not configured yet, reloading supervisor config...");
         sudo('supervisorctl reread');
         sudo('supervisorctl update');
+
+        return;
+    }
+
+    // Restart the workers
+    try {
+        sudo("supervisorctl restart {$workerName}:*");
+
+        // Verify workers are running
+        $status = run("supervisorctl status {$workerName}:* 2>&1");
+
+        if (str_contains($status, 'RUNNING')) {
+            info('Queue workers restarted successfully');
+        } else {
+            warning("Queue workers may not be running correctly: {$status}");
+        }
+    } catch (\Throwable $e) {
+        throw new \RuntimeException("Failed to restart queue workers: " . $e->getMessage());
     }
 });
 
@@ -243,12 +308,22 @@ task('queue:stop', function () {
         return;
     }
 
-    try {
-        sudo("supervisorctl stop {$workerName}:*");
-        info('Queue workers stopped');
-    } catch (\Throwable) {
-        // Worker may not be configured
+    if (! test('[ -x /usr/bin/supervisorctl ]')) {
+        warning('Supervisor not installed');
+
+        return;
     }
+
+    $workerExists = run("supervisorctl status {$workerName}:* 2>&1 || echo 'NOT_FOUND'");
+
+    if (str_contains($workerExists, 'NOT_FOUND') || str_contains($workerExists, 'no such')) {
+        info("Queue worker {$workerName} not configured");
+
+        return;
+    }
+
+    sudo("supervisorctl stop {$workerName}:*");
+    info('Queue workers stopped');
 });
 
 desc('Start queue workers');
@@ -259,10 +334,28 @@ task('queue:start', function () {
         return;
     }
 
-    try {
-        sudo("supervisorctl start {$workerName}:*");
+    if (! test('[ -x /usr/bin/supervisorctl ]')) {
+        warning('Supervisor not installed');
+
+        return;
+    }
+
+    $workerExists = run("supervisorctl status {$workerName}:* 2>&1 || echo 'NOT_FOUND'");
+
+    if (str_contains($workerExists, 'NOT_FOUND') || str_contains($workerExists, 'no such')) {
+        warning("Queue worker {$workerName} not configured. Run: dep queue:setup <environment>");
+
+        return;
+    }
+
+    sudo("supervisorctl start {$workerName}:*");
+
+    // Verify started
+    $status = run("supervisorctl status {$workerName}:* 2>&1");
+
+    if (str_contains($status, 'RUNNING')) {
         info('Queue workers started');
-    } catch (\Throwable) {
-        // Worker may not be configured
+    } else {
+        warning("Queue workers may not have started correctly: {$status}");
     }
 });

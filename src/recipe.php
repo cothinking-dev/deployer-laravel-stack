@@ -9,6 +9,9 @@ require __DIR__.'/tasks/services.php';
 require __DIR__.'/tasks/github.php';
 require __DIR__.'/tasks/verify.php';
 require __DIR__.'/tasks/storage.php';
+require __DIR__.'/tasks/preflight.php';
+require __DIR__.'/tasks/rollback.php';
+require __DIR__.'/tasks/migrate.php';
 require __DIR__.'/provision/bootstrap.php';
 require __DIR__.'/provision/firewall.php';
 require __DIR__.'/provision/php.php';
@@ -71,15 +74,27 @@ task('setup:all', function () {
 
 after('setup:all', 'provision:all');
 
+// Run pre-flight checks before anything else
+before('deploy:prepare', 'deploy:preflight');
+
 before('deploy:shared', 'deploy:env');
 before('deploy:symlink', 'deploy:fix-permissions');
 before('deploy:symlink', 'artisan:down');
 before('deploy:symlink', 'horizon:terminate');
 after('deploy:vendors', 'npm:install');
 after('npm:install', 'npm:build');
+
+// Run migrations with backup before going live
+after('npm:build', 'migrate:safe');
+
 after('deploy:symlink', 'php-fpm:restart');
 after('deploy:symlink', 'artisan:up');
 after('artisan:storage:link', 'storage:link-custom');
+
+// Verify deployment health - triggers auto-rollback on failure
 after('deploy:symlink', 'deploy:verify');
 after('deploy:symlink', 'queue:restart');
+
+// On failure, attempt to rollback and unlock
+fail('deploy', 'deploy:rollback-on-failure');
 fail('deploy', 'deploy:unlock');

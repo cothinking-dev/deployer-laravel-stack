@@ -146,17 +146,144 @@ function environment(string $name, array $config): void
  * Resolve secret placeholders in env values.
  *
  * @param  array<string, mixed>  $env
+ * @param  bool  $strict  If true, throw exception on unresolved placeholders
  * @return array<string, mixed>
+ *
+ * @throws \RuntimeException If strict mode and unresolved placeholder found
  */
-function resolveSecrets(array $env): array
+function resolveSecrets(array $env, bool $strict = false): array
 {
     $secrets = has('secrets') ? get('secrets') : [];
+    $unresolved = [];
 
-    return array_map(function ($value) use ($secrets) {
+    $resolved = array_map(function ($value) use ($secrets, &$unresolved) {
         if (is_string($value) && preg_match('/^\{(\w+)\}$/', $value, $matches)) {
-            return $secrets[$matches[1]] ?? $value;
+            $key = $matches[1];
+
+            if (isset($secrets[$key]) && $secrets[$key] !== '') {
+                return $secrets[$key];
+            }
+
+            $unresolved[] = $key;
+
+            return $value; // Return original placeholder
         }
 
         return $value;
     }, $env);
+
+    if ($strict && ! empty($unresolved)) {
+        throw new \RuntimeException(
+            'Unresolved secret placeholders: {' . implode('}, {', $unresolved) . '}. ' .
+            'Ensure these environment variables are set.'
+        );
+    }
+
+    return $resolved;
+}
+
+/**
+ * Validate that required configuration keys are set.
+ *
+ * @param  array<string>  $required  List of required config keys
+ *
+ * @throws \RuntimeException If required keys are missing
+ */
+function validateConfig(array $required): void
+{
+    $missing = [];
+
+    foreach ($required as $key) {
+        if (! has($key) || get($key) === null || get($key) === '') {
+            $missing[] = $key;
+        }
+    }
+
+    if (! empty($missing)) {
+        throw new \RuntimeException(
+            'Missing required configuration: ' . implode(', ', $missing)
+        );
+    }
+}
+
+/**
+ * Check if a service is running on the remote server.
+ */
+function isServiceRunning(string $service): bool
+{
+    $status = run("systemctl is-active {$service} 2>/dev/null || echo 'inactive'");
+
+    return trim($status) === 'active';
+}
+
+/**
+ * Wait for a service to become active with timeout.
+ *
+ * @param  int  $timeoutSeconds  Maximum time to wait
+ * @return bool True if service became active, false if timeout
+ */
+function waitForService(string $service, int $timeoutSeconds = 30): bool
+{
+    $startTime = time();
+
+    while ((time() - $startTime) < $timeoutSeconds) {
+        if (isServiceRunning($service)) {
+            return true;
+        }
+
+        run('sleep 1');
+    }
+
+    return false;
+}
+
+/**
+ * Get disk space available at path in MB.
+ */
+function getDiskSpaceMb(string $path): int
+{
+    $output = run("df -BM {$path} 2>/dev/null | tail -1 | awk '{print \$4}' | tr -d 'M'");
+
+    return (int) trim($output);
+}
+
+/**
+ * Get available memory in MB.
+ */
+function getAvailableMemoryMb(): int
+{
+    $output = run("free -m | awk '/^Mem:/ {print \$7}'");
+
+    return (int) trim($output);
+}
+
+/**
+ * Safely run a command with retry logic.
+ *
+ * @param  int  $maxAttempts  Maximum number of attempts
+ * @param  int  $delaySeconds  Delay between attempts
+ * @return string Command output
+ *
+ * @throws \RuntimeException If all attempts fail
+ */
+function runWithRetry(string $command, int $maxAttempts = 3, int $delaySeconds = 2): string
+{
+    $lastException = null;
+
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        try {
+            return run($command);
+        } catch (\Throwable $e) {
+            $lastException = $e;
+
+            if ($attempt < $maxAttempts) {
+                warning("Attempt {$attempt}/{$maxAttempts} failed, retrying in {$delaySeconds}s...");
+                run("sleep {$delaySeconds}");
+            }
+        }
+    }
+
+    throw new \RuntimeException(
+        "Command failed after {$maxAttempts} attempts: " . $lastException->getMessage()
+    );
 }
