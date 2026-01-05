@@ -128,6 +128,7 @@ function environment(string $name, array $config): void
         ->setHostname($hostname)
         ->set('remote_user', 'deployer')
         ->set('forward_agent', false)
+        ->setSshMultiplexing(false)  // Disable multiplexing to improve stability with Deployer v8
         ->set('git_ssh_command', 'ssh -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes')
         ->set('labels', ['stage' => $name])
         ->set('url', "https://{$config['domain']}")
