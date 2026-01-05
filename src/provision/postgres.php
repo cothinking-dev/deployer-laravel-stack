@@ -99,3 +99,31 @@ task('postgres:status', function () {
     $status = sudo('systemctl status postgresql --no-pager -l');
     writeln($status);
 });
+
+desc('Fix PostgreSQL sequences to prevent duplicate key errors');
+task('db:fix-sequences', function () {
+    $dbPass = getSecret('db_password');
+    $dbName = get('db_name');
+    $dbUser = get('db_username', 'deployer');
+
+    info("Fixing PostgreSQL sequences for: {$dbName}");
+
+    // Get all sequences in the database
+    $sequences = run("PGPASSWORD='%secret%' psql -h 127.0.0.1 -U {$dbUser} -d {$dbName} -t -c \"SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public';\" 2>/dev/null || true", secret: $dbPass);
+
+    foreach (explode("\n", $sequences) as $sequence) {
+        $sequence = trim($sequence);
+        if (empty($sequence)) {
+            continue;
+        }
+
+        // Extract table name from sequence (assumes convention: {table}_id_seq)
+        $tableName = preg_replace('/_id_seq$/', '', $sequence);
+
+        // Reset sequence to max id
+        $sql = "SELECT setval('{$sequence}', COALESCE((SELECT MAX(id) FROM {$tableName}), 1), true);";
+        run("PGPASSWORD='%secret%' psql -h 127.0.0.1 -U {$dbUser} -d {$dbName} -c \"{$sql}\" 2>/dev/null || true", secret: $dbPass);
+    }
+
+    info('PostgreSQL sequences fixed');
+});

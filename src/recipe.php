@@ -12,6 +12,7 @@ require __DIR__.'/tasks/storage.php';
 require __DIR__.'/tasks/preflight.php';
 require __DIR__.'/tasks/rollback.php';
 require __DIR__.'/tasks/migrate.php';
+require __DIR__.'/tasks/cache.php';
 require __DIR__.'/provision/bootstrap.php';
 require __DIR__.'/provision/firewall.php';
 require __DIR__.'/provision/php.php';
@@ -84,11 +85,18 @@ before('deploy:symlink', 'horizon:terminate');
 after('deploy:vendors', 'npm:install');
 after('npm:install', 'npm:build');
 
+// Fix PostgreSQL sequences before migrations to prevent duplicate key errors
+after('npm:build', 'db:fix-sequences');
+
 // Run migrations with backup before going live
-after('npm:build', 'migrate:safe');
+after('db:fix-sequences', 'migrate:safe');
 
 after('deploy:symlink', 'php-fpm:restart');
 after('deploy:symlink', 'artisan:up');
+
+// Clear and rebuild caches after app is live
+after('artisan:up', 'artisan:cache:refresh');
+
 after('artisan:storage:link', 'storage:link-custom');
 
 // Verify deployment health - triggers auto-rollback on failure
