@@ -27,14 +27,8 @@ set('php_version', '8.4');
 set('node_version', '22');
 set('db_username', 'deployer');
 
-// SSH Connection Hardening (improves stability with Deployer v8's socket server)
+// Default timeout for commands (5 minutes)
 set('default_timeout', 300);
-set('ssh_arguments', [
-    '-o', 'ConnectTimeout=30',
-    '-o', 'ServerAliveInterval=15',
-    '-o', 'ServerAliveCountMax=4',
-    '-o', 'TCPKeepAlive=yes',
-]);
 
 desc('Run all provisioning tasks (new server setup)');
 task('provision:all', [
