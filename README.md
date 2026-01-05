@@ -20,6 +20,7 @@ A [Deployer](https://deployer.org/) recipe for Laravel applications with automat
 - [Deployer 8.x](https://deployer.org/)
 - [1Password CLI](https://developer.1password.com/docs/cli/) (`brew install 1password-cli`)
 - [GitHub CLI](https://cli.github.com/) (`brew install gh`)
+- [direnv](https://direnv.net/) (`brew install direnv`) - optional but recommended
 
 **Server:**
 
@@ -58,10 +59,33 @@ composer update
 ```bash
 cp vendor/cothinking-dev/deployer-laravel-stack/examples/deploy.php ./deploy.php
 cp -r vendor/cothinking-dev/deployer-laravel-stack/examples/deploy ./deploy
+cp vendor/cothinking-dev/deployer-laravel-stack/examples/.envrc ./.envrc
 chmod +x ./deploy/dep
 ```
 
-### 2. Configure 1Password Secrets
+### 2. Set Up direnv (Recommended)
+
+Using direnv allows you to run `dep` from any subdirectory without the `./deploy/` prefix:
+
+```bash
+# Install direnv if not already installed
+brew install direnv
+
+# Add hook to your shell (add to ~/.zshrc or ~/.bashrc)
+eval "$(direnv hook zsh)"
+
+# Allow the .envrc file
+direnv allow
+```
+
+Now you can run commands from anywhere in the project:
+
+```bash
+dep deploy prod          # Instead of ./deploy/dep deploy prod
+cd app/Models && dep deploy staging  # Works from subdirectories
+```
+
+### 3. Configure 1Password Secrets
 
 Edit `deploy/secrets.tpl` with your 1Password references:
 
@@ -71,7 +95,7 @@ DEPLOYER_DB_PASSWORD=op://YourVault/your-item/db-password
 DEPLOYER_APP_KEY=op://YourVault/your-item/app-key
 ```
 
-### 3. Configure deploy.php
+### 4. Configure deploy.php
 
 Edit `deploy.php` and update:
 
@@ -80,22 +104,31 @@ Edit `deploy.php` and update:
 - `server_hostname` - Your server hostname/IP
 - Environment domains, database names, etc.
 
-### 4. Deploy
+### 5. Configure deploy/dep
+
+Edit `deploy/dep` and update the project-specific settings:
+
+```bash
+export DEPLOYER_APP_NAME="${DEPLOYER_APP_NAME:-My Application}"
+export DEPLOYER_HOST="${DEPLOYER_HOST:-your-server.example.com}"
+```
+
+### 6. Deploy
 
 **Fresh server (3 commands):**
 
 ```bash
-./deploy/dep setup:server server           # Bootstrap + add GitHub deploy key
-./deploy/dep setup:environment prod        # Provision + Caddy + deploy prod
-./deploy/dep setup:environment staging     # Add staging (fast - reuses provisioning)
+dep setup:server server           # Bootstrap + add GitHub deploy key
+dep setup:environment prod        # Provision + Caddy + deploy prod
+dep setup:environment staging     # Add staging (fast - reuses provisioning)
 ```
 
 **Regular deployments:**
 
 ```bash
-./deploy/dep deploy prod      # Deploy to production
-./deploy/dep deploy staging   # Deploy to staging
-./deploy/dep deploy:all       # Deploy to all environments
+dep deploy prod      # Deploy to production
+dep deploy staging   # Deploy to staging
+dep deploy:all       # Deploy to all environments
 ```
 
 ## File Structure
@@ -104,11 +137,33 @@ After setup, your project should have:
 
 ```
 your-project/
-├── deploy.php                    # Main deployer config (single file, human-readable)
+├── deploy.php          # Main deployer config
+├── .envrc              # direnv config (adds deploy/ to PATH)
 └── deploy/
-    ├── dep                       # Thin wrapper (delegates to recipe's bin/dep)
-    └── secrets.tpl               # 1Password secret references
+    ├── dep             # Thin wrapper with project config
+    └── secrets.tpl     # 1Password secret references
 ```
+
+## Architecture
+
+The deployment system has two layers:
+
+1. **Vendor script** (`vendor/.../bin/dep`) - Contains all the robust logic:
+   - Project root detection (works from any subdirectory)
+   - 1Password integration
+   - Color output with TTY detection
+   - Prerequisite validation
+   - Multi-environment commands
+
+2. **Project wrapper** (`deploy/dep`) - Thin wrapper that:
+   - Sets project-specific environment variables
+   - Displays project banner
+   - Delegates to vendor script
+
+This design means:
+- All robust logic is shared across projects
+- Each project only configures its own settings
+- Updates to the package benefit all projects
 
 ## Configuration
 
@@ -211,6 +266,18 @@ set('shared_env', [
 after('deploy:failed', 'deploy:unlock');
 ```
 
+### Environment Variables
+
+The `deploy/dep` wrapper accepts these environment variables:
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `DEPLOYER_SECRETS_FILE` | `deploy/secrets.tpl` | Path to 1Password secrets template |
+| `DEPLOYER_ENVIRONMENTS` | `prod staging server` | Space-separated list of valid environments |
+| `DEPLOYER_PROD_ENVIRONMENTS` | `prod staging` | Environments for `deploy:all` and `caddy:all` |
+| `DEPLOYER_APP_NAME` | `Application` | Displayed in banner |
+| `DEPLOYER_HOST` | (none) | Server hostname |
+
 ### Environment Helper
 
 The `environment()` helper creates hosts with sensible defaults:
@@ -266,9 +333,9 @@ Prod and staging are **separate deployments** on the same server:
 ### Fresh Server Setup
 
 ```bash
-./deploy/dep setup:server server           # 1. Bootstrap + GitHub deploy key
-./deploy/dep setup:environment prod        # 2. Provision + Caddy + deploy prod
-./deploy/dep setup:environment staging     # 3. Add staging (fast)
+dep setup:server server           # 1. Bootstrap + GitHub deploy key
+dep setup:environment prod        # 2. Provision + Caddy + deploy prod
+dep setup:environment staging     # 3. Add staging (fast)
 ```
 
 The second `setup:environment` is fast - provisioning tasks are idempotent and skip if already installed.
@@ -276,122 +343,122 @@ The second `setup:environment` is fast - provisioning tasks are idempotent and s
 ### Regular Deployments
 
 ```bash
-./deploy/dep deploy prod      # Deploy to production
-./deploy/dep deploy staging   # Deploy to staging
-./deploy/dep deploy:all       # Deploy to all environments
+dep deploy prod      # Deploy to production
+dep deploy staging   # Deploy to staging
+dep deploy:all       # Deploy to all environments
 ```
 
 ### Manual Steps (if needed)
 
 ```bash
-./deploy/dep setup:server server    # Bootstrap deployer user + GitHub key
-./deploy/dep provision:all prod     # Install PHP, Postgres, Redis, etc.
-./deploy/dep caddy:all              # Configure Caddy for all domains
-./deploy/dep deploy:all             # Deploy all environments
+dep setup:server server    # Bootstrap deployer user + GitHub key
+dep provision:all prod     # Install PHP, Postgres, Redis, etc.
+dep caddy:all              # Configure Caddy for all domains
+dep deploy:all             # Deploy all environments
 ```
 
 ## Available Commands
 
 ### Server Setup
 
-| Command                               | Description                                      |
-| ------------------------------------- | ------------------------------------------------ |
-| `./deploy/dep setup:server server`    | Bootstrap server + auto-add deploy key to GitHub |
-| `./deploy/dep setup:environment prod` | Provision + configure Caddy + deploy             |
+| Command | Description |
+| ------- | ----------- |
+| `dep setup:server server` | Bootstrap server + auto-add deploy key to GitHub |
+| `dep setup:environment prod` | Provision + configure Caddy + deploy |
 
 ### Provisioning
 
-| Command                                   | Description                        |
-| ----------------------------------------- | ---------------------------------- |
-| `./deploy/dep provision:all prod`         | Run all provisioning tasks         |
-| `./deploy/dep provision:bootstrap server` | Create deployer user with SSH keys |
-| `./deploy/dep provision:firewall prod`    | Configure UFW firewall             |
-| `./deploy/dep provision:fail2ban prod`    | Install and configure Fail2ban     |
-| `./deploy/dep provision:php prod`         | Install PHP with extensions        |
-| `./deploy/dep provision:composer prod`    | Install Composer globally          |
-| `./deploy/dep provision:node prod`        | Install Node.js                    |
-| `./deploy/dep provision:postgres prod`    | Install and configure PostgreSQL   |
-| `./deploy/dep provision:redis prod`       | Install Redis server               |
-| `./deploy/dep provision:caddy prod`       | Install Caddy web server           |
+| Command | Description |
+| ------- | ----------- |
+| `dep provision:all prod` | Run all provisioning tasks |
+| `dep provision:bootstrap server` | Create deployer user with SSH keys |
+| `dep provision:firewall prod` | Configure UFW firewall |
+| `dep provision:fail2ban prod` | Install and configure Fail2ban |
+| `dep provision:php prod` | Install PHP with extensions |
+| `dep provision:composer prod` | Install Composer globally |
+| `dep provision:node prod` | Install Node.js |
+| `dep provision:postgres prod` | Install and configure PostgreSQL |
+| `dep provision:redis prod` | Install Redis server |
+| `dep provision:caddy prod` | Install Caddy web server |
 
 ### Deployment
 
-| Command                       | Description                  |
-| ----------------------------- | ---------------------------- |
-| `./deploy/dep deploy prod`    | Deploy to production         |
-| `./deploy/dep deploy staging` | Deploy to staging            |
-| `./deploy/dep deploy:all`     | Deploy to all environments   |
-| `./deploy/dep rollback prod`  | Rollback to previous release |
+| Command | Description |
+| ------- | ----------- |
+| `dep deploy prod` | Deploy to production |
+| `dep deploy staging` | Deploy to staging |
+| `dep deploy:all` | Deploy to all environments |
+| `dep rollback prod` | Rollback to previous release |
 
 ### Caddy
 
-| Command                              | Description                          |
-| ------------------------------------ | ------------------------------------ |
-| `./deploy/dep caddy:configure prod`  | Configure Caddy for domain           |
-| `./deploy/dep caddy:all`             | Configure Caddy for all environments |
-| `./deploy/dep caddy:reload prod`     | Reload Caddy configuration           |
-| `./deploy/dep caddy:status prod`     | Show Caddy status                    |
-| `./deploy/dep caddy:list-sites prod` | List configured sites                |
+| Command | Description |
+| ------- | ----------- |
+| `dep caddy:configure prod` | Configure Caddy for domain |
+| `dep caddy:all` | Configure Caddy for all environments |
+| `dep caddy:reload prod` | Reload Caddy configuration |
+| `dep caddy:status prod` | Show Caddy status |
+| `dep caddy:list-sites prod` | List configured sites |
 
 ### Services
 
-| Command                             | Description            |
-| ----------------------------------- | ---------------------- |
-| `./deploy/dep php-fpm:restart prod` | Restart PHP-FPM        |
-| `./deploy/dep php-fpm:status prod`  | Show PHP-FPM status    |
-| `./deploy/dep redis:status prod`    | Show Redis status      |
-| `./deploy/dep postgres:status prod` | Show PostgreSQL status |
+| Command | Description |
+| ------- | ----------- |
+| `dep php-fpm:restart prod` | Restart PHP-FPM |
+| `dep php-fpm:status prod` | Show PHP-FPM status |
+| `dep redis:status prod` | Show Redis status |
+| `dep postgres:status prod` | Show PostgreSQL status |
 
 ### Queue Workers
 
-| Command                          | Description                      |
-| -------------------------------- | -------------------------------- |
-| `./deploy/dep queue:setup prod`  | Create Supervisor config         |
-| `./deploy/dep queue:status prod` | Show queue worker status         |
-| `./deploy/dep queue:restart prod`| Restart queue workers            |
-| `./deploy/dep queue:stop prod`   | Stop queue workers               |
-| `./deploy/dep queue:start prod`  | Start queue workers              |
+| Command | Description |
+| ------- | ----------- |
+| `dep queue:setup prod` | Create Supervisor config |
+| `dep queue:status prod` | Show queue worker status |
+| `dep queue:restart prod` | Restart queue workers |
+| `dep queue:stop prod` | Stop queue workers |
+| `dep queue:start prod` | Start queue workers |
 
 ### Database
 
-| Command                               | Description              |
-| ------------------------------------- | ------------------------ |
-| `./deploy/dep db:check prod`          | Test database connection |
-| `./deploy/dep postgres:list-dbs prod` | List all databases       |
+| Command | Description |
+| ------- | ----------- |
+| `dep db:check prod` | Test database connection |
+| `dep postgres:list-dbs prod` | List all databases |
 
 ### Environment
 
-| Command                          | Description                         |
-| -------------------------------- | ----------------------------------- |
-| `./deploy/dep env:show prod`     | Show .env (secrets masked)          |
-| `./deploy/dep env:backups prod`  | List .env backups                   |
-| `./deploy/dep env:restore prod`  | Restore .env from backup            |
-| `./deploy/dep deploy:env:force prod` | Force regenerate .env           |
+| Command | Description |
+| ------- | ----------- |
+| `dep env:show prod` | Show .env (secrets masked) |
+| `dep env:backups prod` | List .env backups |
+| `dep env:restore prod` | Restore .env from backup |
+| `dep deploy:env:force prod` | Force regenerate .env |
 
 ### GitHub
 
-| Command                                  | Description                                  |
-| ---------------------------------------- | -------------------------------------------- |
-| `./deploy/dep github:generate-key server`| Generate project-specific deploy key         |
-| `./deploy/dep github:deploy-key server`  | Add deploy key to GitHub repo                |
-| `./deploy/dep github:show-key server`    | Show the deploy key for this project         |
+| Command | Description |
+| ------- | ----------- |
+| `dep github:generate-key server` | Generate project-specific deploy key |
+| `dep github:deploy-key server` | Add deploy key to GitHub repo |
+| `dep github:show-key server` | Show the deploy key for this project |
 
 ### Utilities
 
-| Command                                | Description            |
-| -------------------------------------- | ---------------------- |
-| `./deploy/dep artisan:log prod`        | Show Laravel log tail  |
-| `./deploy/dep artisan:log:follow prod` | Follow Laravel log     |
-| `./deploy/dep app:status prod`         | Show deployment status |
-| `./deploy/dep ssh prod`                | SSH into server        |
-| `./deploy/dep deploy:verify prod`      | Run HTTP health check  |
+| Command | Description |
+| ------- | ----------- |
+| `dep artisan:log prod` | Show Laravel log tail |
+| `dep artisan:log:follow prod` | Follow Laravel log |
+| `dep app:status prod` | Show deployment status |
+| `dep ssh prod` | SSH into server |
+| `dep deploy:verify prod` | Run HTTP health check |
 
 ## TLS Modes
 
-| Mode       | Description                                         |
-| ---------- | --------------------------------------------------- |
+| Mode | Description |
+| ---- | ----------- |
 | `internal` | Self-signed certificate (use with Cloudflare proxy) |
-| `acme`     | Let's Encrypt automatic certificate                 |
+| `acme` | Let's Encrypt automatic certificate |
 
 ## Security Features
 
@@ -424,7 +491,7 @@ The second `setup:environment` is fast - provisioning tasks are idempotent and s
 ssh deployer@your-server "cat ~/.ssh/id_ed25519.pub"
 
 # Re-run the GitHub deploy key task
-./deploy/dep github:deploy-key server
+dep github:deploy-key server
 
 # Or manually add to GitHub
 gh repo deploy-key add - --title "deployer@hostname" -R org/repo
@@ -436,17 +503,17 @@ The deployer user has NOPASSWD sudo for whitelisted commands only. If a command 
 
 ```bash
 # Check current sudo rules
-./deploy/dep provision:sudo:show server
+dep provision:sudo:show server
 
 # Re-run bootstrap to update rules (as root)
-./deploy/dep provision:bootstrap server
+dep provision:bootstrap server
 ```
 
 ### Database connection failed
 
 ```bash
 # Check database exists
-./deploy/dep db:check prod
+dep db:check prod
 
 # Reset database password
 ssh root@your-server "sudo -u postgres psql -c \"ALTER USER deployer WITH PASSWORD 'newpass';\""
@@ -456,10 +523,10 @@ ssh root@your-server "sudo -u postgres psql -c \"ALTER USER deployer WITH PASSWO
 
 ```bash
 # Check Laravel logs
-./deploy/dep artisan:log prod
+dep artisan:log prod
 
 # Check Caddy status
-./deploy/dep caddy:status prod
+dep caddy:status prod
 
 # Manual health check
 curl -I https://your-domain.com
@@ -516,9 +583,9 @@ For the second (and subsequent) projects, provisioning is fast since services ar
 
 ```bash
 # From Project B's directory
-./deploy/dep setup:server server           # Adds Project B's deploy key to GitHub
-./deploy/dep setup:environment prod        # Creates DB, Caddy config, deploys
-./deploy/dep setup:environment staging     # Creates staging DB, Caddy config, deploys
+dep setup:server server           # Adds Project B's deploy key to GitHub
+dep setup:environment prod        # Creates DB, Caddy config, deploys
+dep setup:environment staging     # Creates staging DB, Caddy config, deploys
 ```
 
 The `provision:*` tasks are idempotent - they skip installation if the service already exists.
@@ -543,12 +610,12 @@ GitHub requires deploy keys to be unique per repository. You **cannot** use the 
 
 ```bash
 # From Project A's directory
-./deploy/dep github:generate-key server    # Creates ~/.ssh/deploy_org_project-a
-./deploy/dep github:deploy-key server      # Adds to GitHub
+dep github:generate-key server    # Creates ~/.ssh/deploy_org_project-a
+dep github:deploy-key server      # Adds to GitHub
 
 # From Project B's directory
-./deploy/dep github:generate-key server    # Creates ~/.ssh/deploy_org_project-b
-./deploy/dep github:deploy-key server      # Adds to GitHub
+dep github:generate-key server    # Creates ~/.ssh/deploy_org_project-b
+dep github:deploy-key server      # Adds to GitHub
 ```
 
 This creates separate keys per project:

@@ -1,53 +1,91 @@
 #!/bin/bash
+# Deployer wrapper with 1Password integration
+# Usage: dep <command> <environment>
+
 set -eo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
-if [[ -L "${BASH_SOURCE[0]}" ]]; then
-    readonly PROJECT_DIR="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}")")/../../.." && pwd)"
-else
-    readonly PROJECT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-fi
+# Find project root (works from any subdirectory)
+find_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/deploy.php" && -f "$dir/composer.json" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+PROJECT_DIR="$(find_project_root)" || {
+    echo "Error: Could not find project root (looking for deploy.php)" >&2
+    exit 1
+}
+
+cd "$PROJECT_DIR"
 
 readonly SECRETS_FILE="${DEPLOYER_SECRETS_FILE:-deploy/secrets.tpl}"
+readonly ENVIRONMENTS="${DEPLOYER_ENVIRONMENTS:-prod staging server}"
+readonly PROD_ENVS="${DEPLOYER_PROD_ENVIRONMENTS:-prod staging}"
+readonly APP_NAME="${DEPLOYER_APP_NAME:-Application}"
 
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m'
+# ─────────────────────────────────────────────────────────────────────────────
+# Colors (with fallback for non-interactive terminals)
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    readonly RED='\033[0;31m'
+    readonly GREEN='\033[0;32m'
+    readonly BLUE='\033[0;34m'
+    readonly YELLOW='\033[0;33m'
+    readonly NC='\033[0m'
+else
+    readonly RED='' GREEN='' BLUE='' YELLOW='' NC=''
+fi
 
 error() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 info() { echo -e "${BLUE}$*${NC}"; }
 success() { echo -e "${GREEN}$*${NC}"; }
+warn() { echo -e "${YELLOW}$*${NC}"; }
 
-cd "$PROJECT_DIR"
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage
+# ─────────────────────────────────────────────────────────────────────────────
 
 show_usage() {
-    local app_name="${DEPLOYER_APP_NAME:-Application}"
-    echo "Usage: ./deploy/dep <command> <environment>"
-    echo ""
-    echo "Environments:"
-    echo "  prod     - Production"
-    echo "  staging  - Staging"
-    echo "  server   - Bootstrap (runs as root)"
-    echo ""
-    echo "Fresh server setup:"
-    echo "  ./deploy/dep setup:server server && ./deploy/dep setup:environment prod"
-    echo ""
-    echo "Regular deploys:"
-    echo "  ./deploy/dep deploy prod"
-    echo "  ./deploy/dep deploy staging"
-    echo ""
-    echo "Multi-environment commands:"
-    echo "  ./deploy/dep caddy:all     - Configure Caddy for all environments"
-    echo "  ./deploy/dep deploy:all    - Deploy to all environments"
+    cat <<EOF
+Usage: dep <command> <environment>
+
+Environments:
+  prod     - Production
+  staging  - Staging
+  server   - Bootstrap (runs as root)
+
+Fresh server setup:
+  dep setup:server server && dep setup:environment prod
+
+Regular deploys:
+  dep deploy prod
+  dep deploy staging
+
+Multi-environment commands:
+  dep caddy:all     - Configure Caddy for all environments
+  dep deploy:all    - Deploy to all environments
+EOF
     exit 1
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parse Arguments
+# ─────────────────────────────────────────────────────────────────────────────
 
 ENV=""
 COMMAND=""
 ARGS=()
-ENVIRONMENTS="${DEPLOYER_ENVIRONMENTS:-prod staging server}"
 
 for arg in "$@"; do
     for env in $ENVIRONMENTS; do
@@ -62,21 +100,26 @@ for arg in "$@"; do
     ARGS+=("$arg")
 done
 
+# Handle multi-environment commands
 if [[ "$COMMAND" == "caddy:all" || "$COMMAND" == "deploy:all" ]]; then
     ENV="all"
 fi
 
 [[ -z "$ENV" ]] && show_usage
 
-DEPLOYER_ENV="$ENV"
-[[ "$ENV" == "server" || "$ENV" == "all" ]] && DEPLOYER_ENV="prod"
+# ─────────────────────────────────────────────────────────────────────────────
+# Validate Prerequisites
+# ─────────────────────────────────────────────────────────────────────────────
 
-if [[ ! -f "$SECRETS_FILE" ]]; then
-    error "Secrets file not found: $SECRETS_FILE\nCreate it or set DEPLOYER_SECRETS_FILE env var"
-fi
+[[ -f "$SECRETS_FILE" ]] || error "Secrets file not found: $SECRETS_FILE"
+[[ -f "vendor/bin/dep" ]] || error "Deployer not installed. Run: composer install"
 
 command -v op >/dev/null 2>&1 || error "1Password CLI (op) not installed.\nInstall: brew install 1password-cli"
 command -v gh >/dev/null 2>&1 || error "GitHub CLI (gh) not installed.\nInstall: brew install gh"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Authenticate
+# ─────────────────────────────────────────────────────────────────────────────
 
 if ! op account list &>/dev/null 2>&1; then
     info "Signing in to 1Password..."
@@ -88,33 +131,23 @@ if ! gh auth status &>/dev/null 2>&1; then
     gh auth login
 fi
 
-info "Environment: $DEPLOYER_ENV"
+# ─────────────────────────────────────────────────────────────────────────────
+# Set Environment
+# ─────────────────────────────────────────────────────────────────────────────
+
+DEPLOYER_ENV="$ENV"
+[[ "$ENV" == "server" || "$ENV" == "all" ]] && DEPLOYER_ENV="prod"
+
 export DEPLOYER_ENV
+info "Environment: $DEPLOYER_ENV"
 
-# Warm up SSH connection before Deployer starts
-# This triggers 1Password/SSH agent authentication BEFORE Deployer's socket server starts
-warmup_ssh() {
-    local host="${DEPLOYER_HOST:-}"
-    local user="${DEPLOYER_SSH_USER:-deployer}"
-    [[ -z "$host" ]] && return 0  # Skip if no host configured
-
-    local target="${user}@${host}"
-
-    # Try BatchMode first (succeeds if already authenticated)
-    if ssh -o ConnectTimeout=30 -o BatchMode=yes "$target" "echo ok" &>/dev/null; then
-        return 0
-    fi
-    # If BatchMode fails (needs auth), run interactively to trigger 1Password/Touch ID
-    info "Warming up SSH connection..."
-    ssh -o ConnectTimeout=30 "$target" "echo ok" &>/dev/null || true
-}
+# ─────────────────────────────────────────────────────────────────────────────
+# Run Deployer
+# ─────────────────────────────────────────────────────────────────────────────
 
 run_deployer() {
-    warmup_ssh
     op run --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
 }
-
-PROD_ENVS="${DEPLOYER_PROD_ENVIRONMENTS:-prod staging}"
 
 case "$COMMAND" in
     caddy:all)
@@ -122,7 +155,7 @@ case "$COMMAND" in
         total=$(echo $PROD_ENVS | wc -w | tr -d ' ')
         for env in $PROD_ENVS; do
             success "[$i/$total] Configuring Caddy for $env..."
-            run_deployer caddy:configure $env -v
+            run_deployer caddy:configure "$env" -v
             echo ""
             ((i++))
         done
@@ -133,7 +166,7 @@ case "$COMMAND" in
         total=$(echo $PROD_ENVS | wc -w | tr -d ' ')
         for env in $PROD_ENVS; do
             success "[$i/$total] Deploying $env..."
-            run_deployer deploy $env -v
+            run_deployer deploy "$env" -v
             echo ""
             ((i++))
         done
