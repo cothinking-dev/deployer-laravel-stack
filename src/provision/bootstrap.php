@@ -96,7 +96,8 @@ task('provision:bootstrap', function () {
 
         if ($sudoPass !== null) {
             info("Setting password for user '{$user}'...");
-            $passHash = run("printf '%s' %secret% | openssl passwd -stdin -6 2>/dev/null", secret: $sudoPass);
+            $escapedPass = escapeshellarg($sudoPass);
+            $passHash = run("printf '%s' {$escapedPass} | openssl passwd -stdin -6 2>/dev/null");
             run("usermod -p '{$passHash}' {$user}");
         } else {
             info("No sudo password configured - user will require NOPASSWD sudo rules");
@@ -106,7 +107,8 @@ task('provision:bootstrap', function () {
 
         if ($sudoPass !== null) {
             info("Updating password for existing user '{$user}'...");
-            $passHash = run("printf '%s' %secret% | openssl passwd -stdin -6 2>/dev/null", secret: $sudoPass);
+            $escapedPass = escapeshellarg($sudoPass);
+            $passHash = run("printf '%s' {$escapedPass} | openssl passwd -stdin -6 2>/dev/null");
 
             $maxRetries = 3;
             $delay = 2;
