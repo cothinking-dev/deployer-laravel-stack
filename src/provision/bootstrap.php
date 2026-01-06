@@ -121,9 +121,30 @@ task('provision:bootstrap', function () {
 
     info("Setting password for user '{$user}'...");
 
-    $passHash = run("echo '%secret%' | openssl passwd -stdin -6", secret: $sudoPass);
-    run("usermod -p '{$passHash}' {$user}");
-    run("usermod -aG sudo {$user}");
+    $passHash = run("echo '%secret%' | openssl passwd -stdin -6 2>/dev/null", secret: $sudoPass);
+
+    $maxRetries = 3;
+    $delay = 2;
+
+    for ($i = 0; $i < $maxRetries; $i++) {
+        try {
+            if ($i > 0) {
+                info("Retrying password update (attempt {$i}/{$maxRetries})...");
+                run("sleep {$delay}");
+            }
+
+            run("usermod -p '{$passHash}' {$user}");
+            run("usermod -aG sudo {$user}");
+            break;
+        } catch (\Throwable $e) {
+            if ($i === $maxRetries - 1) {
+                throw new \RuntimeException(
+                    "Failed to set password after {$maxRetries} attempts: {$e->getMessage()}"
+                );
+            }
+            $delay *= 2;
+        }
+    }
 
     // Make home directory traversable by web servers (Caddy, PHP-FPM)
     run("chmod 755 /home/{$user}");
