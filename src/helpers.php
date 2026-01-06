@@ -16,7 +16,9 @@ function sudo(string $command): string
         );
     }
 
-    return run("echo '%secret%' | sudo -S {$command}", secret: $pass);
+    // Use printf to avoid shell quoting issues with echo
+    // The %s format specifier ensures proper handling of special characters
+    return run("printf '%s\n' %secret% | sudo -S {$command}", secret: $pass);
 }
 
 /**
