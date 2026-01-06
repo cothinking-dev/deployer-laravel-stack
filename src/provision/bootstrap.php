@@ -37,6 +37,9 @@ set('sudo_allowed_commands', [
     '/usr/bin/systemctl status fail2ban',
     '/usr/bin/fail2ban-client *',
 
+    // Supervisor management (for queue workers)
+    '/usr/bin/supervisorctl *',
+
     // Package management (for provisioning)
     '/usr/bin/apt-get update',
     '/usr/bin/apt-get install *',
