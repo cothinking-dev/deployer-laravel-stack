@@ -104,10 +104,6 @@ task('provision:bootstrap', function () {
     $secrets = has('secrets') ? get('secrets') : [];
     $sudoPass = $secrets['sudo_pass'] ?? get('sudo_pass') ?? null;
 
-    if ($sudoPass === null) {
-        throw new \RuntimeException('No sudo password configured for deployer user.');
-    }
-
     $user = get('bootstrap_user');
     $hostname = run('hostname');
 
@@ -117,33 +113,47 @@ task('provision:bootstrap', function () {
 
     if (! $userExists) {
         run("adduser --disabled-password --gecos '' {$user}");
-    }
+        run("usermod -aG sudo {$user}");
 
-    info("Setting password for user '{$user}'...");
-
-    $passHash = run("echo '%secret%' | openssl passwd -stdin -6 2>/dev/null", secret: $sudoPass);
-
-    $maxRetries = 3;
-    $delay = 2;
-
-    for ($i = 0; $i < $maxRetries; $i++) {
-        try {
-            if ($i > 0) {
-                info("Retrying password update (attempt {$i}/{$maxRetries})...");
-                run("sleep {$delay}");
-            }
-
+        if ($sudoPass !== null) {
+            info("Setting password for user '{$user}'...");
+            $passHash = run("echo '%secret%' | openssl passwd -stdin -6 2>/dev/null", secret: $sudoPass);
             run("usermod -p '{$passHash}' {$user}");
-            run("usermod -aG sudo {$user}");
-            break;
-        } catch (\Throwable $e) {
-            if ($i === $maxRetries - 1) {
-                throw new \RuntimeException(
-                    "Failed to set password after {$maxRetries} attempts: {$e->getMessage()}"
-                );
-            }
-            $delay *= 2;
+        } else {
+            info("No sudo password configured - user will require NOPASSWD sudo rules");
         }
+    } else {
+        info("User '{$user}' already exists");
+
+        if ($sudoPass !== null) {
+            info("Updating password for existing user '{$user}'...");
+            $passHash = run("echo '%secret%' | openssl passwd -stdin -6 2>/dev/null", secret: $sudoPass);
+
+            $maxRetries = 3;
+            $delay = 2;
+            $success = false;
+
+            for ($i = 0; $i < $maxRetries; $i++) {
+                try {
+                    if ($i > 0) {
+                        info("Retrying password update (attempt " . ($i + 1) . "/{$maxRetries})...");
+                        run("sleep {$delay}");
+                    }
+
+                    run("usermod -p '{$passHash}' {$user}");
+                    $success = true;
+                    break;
+                } catch (\Throwable $e) {
+                    if ($i === $maxRetries - 1) {
+                        warning("Failed to update password after {$maxRetries} attempts: {$e->getMessage()}");
+                        warning("Continuing without password update - ensure NOPASSWD sudo is configured");
+                    }
+                    $delay *= 2;
+                }
+            }
+        }
+
+        run("usermod -aG sudo {$user} 2>/dev/null || true");
     }
 
     // Make home directory traversable by web servers (Caddy, PHP-FPM)
