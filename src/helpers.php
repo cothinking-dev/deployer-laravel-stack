@@ -16,9 +16,13 @@ function sudo(string $command): string
         );
     }
 
-    // Use printf to avoid shell quoting issues with echo
-    // The %s format specifier ensures proper handling of special characters
-    return run("printf '%s\\n' %secret% | sudo -S {$command}", secret: $pass);
+    // Escape the password for safe shell usage
+    // escapeshellarg() handles spaces, quotes, and special characters
+    $escapedPass = escapeshellarg($pass);
+    
+    // Use printf to pipe password to sudo
+    // Password is pre-escaped so it's safe to interpolate directly
+    return run("printf '%s\\n' {$escapedPass} | sudo -S {$command}");
 }
 
 /**
