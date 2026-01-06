@@ -467,36 +467,6 @@ dep deploy:all             # Deploy all environments
 - Fail2ban protects against brute force attacks
 - Deployer user has restricted sudo access (whitelisted commands only)
 - No secrets stored on disk or in git
-- **SSH key separation**: Deploy keys (CI/CD) are command-restricted; admin keys get full shell access
-
-### SSH Key Security
-
-The bootstrap process supports two types of SSH keys with different access levels:
-
-| Key Type | Source | Access Level | Use Case |
-|----------|--------|--------------|----------|
-| **Deploy Key** | `DEPLOYER_DEPLOY_PUBLIC_KEY` in 1Password | Command-restricted (no interactive shell) | CI/CD pipelines, automated deployments |
-| **Admin Key** | Copied from root's `authorized_keys` | Full shell access | Manual debugging, server administration |
-
-**How it works:**
-
-1. **Deploy keys** are wrapped with SSH `command=` restriction - they can only execute commands passed via `SSH_ORIGINAL_COMMAND`, preventing interactive shell access
-2. **Admin keys** (from root) are added without restrictions for full access
-
-**To enable deploy key restriction:**
-
-1. Generate an SSH key pair for your CI/CD system
-2. Store the **public key** in 1Password
-3. Add to `deploy/secrets.tpl`:
-   ```bash
-   DEPLOYER_DEPLOY_PUBLIC_KEY=op://Vault/item/deploy-public-key
-   ```
-4. Run `dep provision:bootstrap server` to apply
-
-**Security benefits:**
-- Compromised CI/CD credentials can only run deploy commands, not interactive shells
-- Admin access requires separate keys (your personal SSH key on root)
-- Clear separation between automated and manual access
 
 ## Deployment Flow
 
