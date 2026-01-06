@@ -197,7 +197,7 @@ host('server')
     ->setHostname(get('server_hostname'))
     ->set('remote_user', 'root')
     ->set('labels', ['stage' => 'server'])
-    ->set('deploy_path', '~/myapp');
+    ->set('deploy_path', '/home/deployer/myapp');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared Resources
@@ -222,7 +222,7 @@ set('secrets', fn () => requireSecrets(
 // ─────────────────────────────────────────────────────────────────────────────
 
 environment('prod', [
-    'deploy_path' => '~/myapp',
+    'deploy_path' => '/home/deployer/myapp',
     'domain'      => 'myapp.example.com',
     'db_name'     => 'myapp',
     'redis_db'    => 0,
@@ -232,7 +232,7 @@ environment('prod', [
 ]);
 
 environment('staging', [
-    'deploy_path' => '~/myapp-staging',
+    'deploy_path' => '/home/deployer/myapp-staging',
     'domain'      => 'staging.myapp.example.com',
     'db_name'     => 'myapp_staging',
     'redis_db'    => 1,
@@ -284,7 +284,7 @@ The `environment()` helper creates hosts with sensible defaults:
 
 ```php
 environment('prod', [
-    'deploy_path' => '~/myapp',      // Required
+    'deploy_path' => '/home/deployer/myapp',  // Required
     'domain'      => 'myapp.com',    // Required
     'db_name'     => 'myapp',        // Required
     'redis_db'    => 0,              // Required
@@ -323,9 +323,9 @@ DEPLOYER_STRIPE_KEY=op://Vault/Stripe/secret-key
 
 Prod and staging are **separate deployments** on the same server:
 
-| Setting     | prod        | staging             |
-| ----------- | ----------- | ------------------- |
-| Deploy path | `~/myapp`   | `~/myapp-staging`   |
+| Setting     | prod                       | staging                           |
+| ----------- | -------------------------- | --------------------------------- |
+| Deploy path | `/home/deployer/myapp`     | `/home/deployer/myapp-staging`    |
 | Database    | `myapp`     | `myapp_staging`     |
 | Redis DB    | `0`         | `1`                 |
 | Domain      | `myapp.com` | `staging.myapp.com` |
@@ -467,6 +467,36 @@ dep deploy:all             # Deploy all environments
 - Fail2ban protects against brute force attacks
 - Deployer user has restricted sudo access (whitelisted commands only)
 - No secrets stored on disk or in git
+- **SSH key separation**: Deploy keys (CI/CD) are command-restricted; admin keys get full shell access
+
+### SSH Key Security
+
+The bootstrap process supports two types of SSH keys with different access levels:
+
+| Key Type | Source | Access Level | Use Case |
+|----------|--------|--------------|----------|
+| **Deploy Key** | `DEPLOYER_DEPLOY_PUBLIC_KEY` in 1Password | Command-restricted (no interactive shell) | CI/CD pipelines, automated deployments |
+| **Admin Key** | Copied from root's `authorized_keys` | Full shell access | Manual debugging, server administration |
+
+**How it works:**
+
+1. **Deploy keys** are wrapped with SSH `command=` restriction - they can only execute commands passed via `SSH_ORIGINAL_COMMAND`, preventing interactive shell access
+2. **Admin keys** (from root) are added without restrictions for full access
+
+**To enable deploy key restriction:**
+
+1. Generate an SSH key pair for your CI/CD system
+2. Store the **public key** in 1Password
+3. Add to `deploy/secrets.tpl`:
+   ```bash
+   DEPLOYER_DEPLOY_PUBLIC_KEY=op://Vault/item/deploy-public-key
+   ```
+4. Run `dep provision:bootstrap server` to apply
+
+**Security benefits:**
+- Compromised CI/CD credentials can only run deploy commands, not interactive shells
+- Admin access requires separate keys (your personal SSH key on root)
+- Clear separation between automated and manual access
 
 ## Deployment Flow
 
@@ -541,10 +571,10 @@ This recipe supports hosting multiple Laravel projects on the same server. Each 
 **Caddy** uses per-domain config files:
 ```
 /etc/caddy/sites-enabled/
-├── project-a-com.conf           → ~/project-a/current/public
-├── staging-project-a-com.conf   → ~/project-a-staging/current/public
-├── project-b-com.conf           → ~/project-b/current/public
-└── staging-project-b-com.conf   → ~/project-b-staging/current/public
+├── project-a-com.conf           → /home/deployer/project-a/current/public
+├── staging-project-a-com.conf   → /home/deployer/project-a-staging/current/public
+├── project-b-com.conf           → /home/deployer/project-b/current/public
+└── staging-project-b-com.conf   → /home/deployer/project-b-staging/current/public
 ```
 
 Each domain gets its own config file, so there are no conflicts.
@@ -555,8 +585,8 @@ When setting up multiple projects, coordinate these resources:
 
 | Resource | Project A | Project B |
 | -------- | --------- | --------- |
-| Deploy path (prod) | `~/project-a` | `~/project-b` |
-| Deploy path (staging) | `~/project-a-staging` | `~/project-b-staging` |
+| Deploy path (prod) | `/home/deployer/project-a` | `/home/deployer/project-b` |
+| Deploy path (staging) | `/home/deployer/project-a-staging` | `/home/deployer/project-b-staging` |
 | Database (prod) | `project_a` | `project_b` |
 | Database (staging) | `project_a_staging` | `project_b_staging` |
 | Redis DB (prod) | `0` | `2` |

@@ -146,7 +146,7 @@ info "Environment: $DEPLOYER_ENV"
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_deployer() {
-    op run --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
+    op run --cache=false --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
 }
 
 case "$COMMAND" in

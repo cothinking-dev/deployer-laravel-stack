@@ -4,6 +4,9 @@ namespace Deployer;
 
 set('bootstrap_user', 'deployer');
 
+// Path to the deploy wrapper script (for command= restriction)
+set('deploy_wrapper_path', '/usr/local/bin/deployer-shell');
+
 // Specific sudo commands allowed for the deployer user
 // This is more secure than NOPASSWD:ALL
 set('sudo_allowed_commands', [
@@ -75,6 +78,27 @@ set('sudo_allowed_commands', [
     '/usr/bin/systemctl disable *',
 ]);
 
+function installDeployerShell(string $path): void
+{
+    $script = <<<'BASH'
+#!/bin/bash
+# Restricted shell for automated deployments (CI/CD)
+# Only allows commands passed via SSH_ORIGINAL_COMMAND
+set -euo pipefail
+
+if [[ -z "${SSH_ORIGINAL_COMMAND:-}" ]]; then
+    echo "Interactive sessions not allowed with this key." >&2
+    echo "Use an admin key for shell access." >&2
+    exit 1
+fi
+
+exec /bin/bash -c "$SSH_ORIGINAL_COMMAND"
+BASH;
+
+    run("echo " . escapeshellarg($script) . " > {$path}");
+    run("chmod 755 {$path}");
+}
+
 desc('Bootstrap server: create deployer user with SSH keys and restricted sudo (run as root)');
 task('provision:bootstrap', function () {
     $secrets = has('secrets') ? get('secrets') : [];
@@ -100,22 +124,36 @@ task('provision:bootstrap', function () {
 
     run("mkdir -p /home/{$user}/.ssh");
 
-    // Check if deploy_public_key is provided
-    $deployKey = has('deploy_public_key') ? get('deploy_public_key') : null;
+    $sshDir = "/home/{$user}/.ssh";
+    $authorizedKeysFile = "{$sshDir}/authorized_keys";
+
+    run("touch {$authorizedKeysFile}");
+
+    $deployKey = $secrets['deploy_public_key'] ?? null;
+    $adminKeys = run("cat /root/.ssh/authorized_keys 2>/dev/null || echo ''");
 
     if ($deployKey) {
-        // Use provided deploy key
-        run("echo " . escapeshellarg($deployKey) . " >> /home/{$user}/.ssh/authorized_keys");
-        info('Added provided deploy public key');
-    } else {
-        // Fall back to copying from root (with warning)
-        warning('No deploy_public_key provided, copying from root (less secure)');
-        run("cp /root/.ssh/authorized_keys /home/{$user}/.ssh/authorized_keys 2>/dev/null || true");
+        info('Adding deploy key with command restriction (CI/CD only)...');
+        $wrapperPath = get('deploy_wrapper_path');
+        installDeployerShell($wrapperPath);
+        $restrictedKey = "command=\"{$wrapperPath}\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding {$deployKey}";
+        run("echo " . escapeshellarg($restrictedKey) . " >> {$authorizedKeysFile}");
+        info('Deploy key added - restricted to deployer commands only');
     }
 
-    run("chown -R {$user}:{$user} /home/{$user}/.ssh");
-    run("chmod 700 /home/{$user}/.ssh");
-    run("chmod 600 /home/{$user}/.ssh/authorized_keys 2>/dev/null || true");
+    if (! empty(trim($adminKeys))) {
+        info('Adding admin keys with full shell access...');
+        run("echo " . escapeshellarg($adminKeys) . " >> {$authorizedKeysFile}");
+        info('Admin keys added from root');
+    }
+
+    if (! $deployKey && empty(trim($adminKeys))) {
+        warning('No SSH keys configured! Add deploy_public_key or ensure root has authorized_keys.');
+    }
+
+    run("chown -R {$user}:{$user} {$sshDir}");
+    run("chmod 700 {$sshDir}");
+    run("chmod 600 {$authorizedKeysFile} 2>/dev/null || true");
 
     // Generate SSH key for GitHub access
     info('Generating SSH key for GitHub access...');

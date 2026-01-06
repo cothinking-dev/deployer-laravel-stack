@@ -23,7 +23,7 @@ host('server')
     ->setHostname(get('server_hostname'))
     ->set('remote_user', 'root')
     ->set('labels', ['stage' => 'server'])
-    ->set('deploy_path', '~/myapp');
+    ->set('deploy_path', '/home/deployer/myapp');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared Resources
@@ -55,7 +55,7 @@ set('secrets', fn () => requireSecrets(
 // ─────────────────────────────────────────────────────────────────────────────
 
 environment('prod', [
-    'deploy_path' => '~/myapp',
+    'deploy_path' => '/home/deployer/myapp',
     'domain' => 'myapp.example.com',
     'db_name' => 'myapp',
     'redis_db' => 0,
@@ -65,7 +65,7 @@ environment('prod', [
 ]);
 
 environment('staging', [
-    'deploy_path' => '~/myapp-staging',
+    'deploy_path' => '/home/deployer/myapp-staging',
     'domain' => 'staging.myapp.example.com',
     'db_name' => 'myapp_staging',
     'redis_db' => 1,
