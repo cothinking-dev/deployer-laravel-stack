@@ -113,8 +113,16 @@ task('provision:bootstrap', function () {
 
     info("Creating user '{$user}'...");
 
-    run("id {$user} &>/dev/null || adduser --disabled-password --gecos '' {$user}");
-    run("echo '{$user}:%secret%' | chpasswd", secret: $sudoPass);
+    $userExists = run("id {$user} &>/dev/null && echo 'exists' || echo 'new'") === 'exists';
+
+    if (! $userExists) {
+        run("adduser --disabled-password --gecos '' {$user}");
+    }
+
+    info("Setting password for user '{$user}'...");
+
+    $passHash = run("echo '%secret%' | openssl passwd -stdin -6", secret: $sudoPass);
+    run("usermod -p '{$passHash}' {$user}");
     run("usermod -aG sudo {$user}");
 
     // Make home directory traversable by web servers (Caddy, PHP-FPM)
