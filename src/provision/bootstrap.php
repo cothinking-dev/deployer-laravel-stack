@@ -78,8 +78,12 @@ set('sudo_allowed_commands', [
     '/usr/bin/systemctl disable *',
 ]);
 
-desc('Bootstrap server: create deployer user with SSH keys and restricted sudo (run as root)');
+desc('Bootstrap server: create deployer user with SSH keys and restricted sudo (can run as root or with sudo access)');
 task('provision:bootstrap', function () {
+    // Check if we need sudo for root operations
+    $currentUser = run('whoami');
+    $sudo = ($currentUser === 'root') ? '' : 'sudo ';
+
     $secrets = has('secrets') ? get('secrets') : [];
     $sudoPass = $secrets['sudo_pass'] ?? get('sudo_pass') ?? null;
 
@@ -91,14 +95,14 @@ task('provision:bootstrap', function () {
     $userExists = run("id {$user} &>/dev/null && echo 'exists' || echo 'new'") === 'exists';
 
     if (! $userExists) {
-        run("adduser --disabled-password --gecos '' {$user}");
-        run("usermod -aG sudo {$user}");
+        run("{$sudo}adduser --disabled-password --gecos '' {$user}");
+        run("{$sudo}usermod -aG sudo {$user}");
 
         if ($sudoPass !== null) {
             info("Setting password for user '{$user}'...");
             $escapedPass = escapeshellarg($sudoPass);
             $passHash = run("printf '%s' {$escapedPass} | openssl passwd -stdin -6 2>/dev/null");
-            run("usermod -p '{$passHash}' {$user}");
+            run("{$sudo}usermod -p '{$passHash}' {$user}");
         } else {
             info("No sudo password configured - user will require NOPASSWD sudo rules");
         }
@@ -121,7 +125,7 @@ task('provision:bootstrap', function () {
                         run("sleep {$delay}");
                     }
 
-                    run("usermod -p '{$passHash}' {$user}");
+                    run("{$sudo}usermod -p '{$passHash}' {$user}");
                     $success = true;
                     break;
                 } catch (\Throwable $e) {
@@ -134,23 +138,24 @@ task('provision:bootstrap', function () {
             }
         }
 
-        run("usermod -aG sudo {$user} 2>/dev/null || true");
+        run("{$sudo}usermod -aG sudo {$user} 2>/dev/null || true");
     }
 
     // Make home directory traversable by web servers (Caddy, PHP-FPM)
-    run("chmod 755 /home/{$user}");
+    run("{$sudo}chmod 755 /home/{$user}");
 
     info('Setting up SSH access...');
 
-    run("mkdir -p /home/{$user}/.ssh");
-    run("cp /root/.ssh/authorized_keys /home/{$user}/.ssh/authorized_keys 2>/dev/null || true");
-    run("chown -R {$user}:{$user} /home/{$user}/.ssh");
-    run("chmod 700 /home/{$user}/.ssh");
-    run("chmod 600 /home/{$user}/.ssh/authorized_keys 2>/dev/null || true");
+    run("{$sudo}mkdir -p /home/{$user}/.ssh");
+    run("{$sudo}cp /root/.ssh/authorized_keys /home/{$user}/.ssh/authorized_keys 2>/dev/null || true");
+    run("{$sudo}chown -R {$user}:{$user} /home/{$user}/.ssh");
+    run("{$sudo}chmod 700 /home/{$user}/.ssh");
+    run("{$sudo}chmod 600 /home/{$user}/.ssh/authorized_keys 2>/dev/null || true");
 
-    // Generate SSH key for GitHub access
+    // Generate SSH key for GitHub access (run as the deployer user)
     info('Generating SSH key for GitHub access...');
-    run("sudo -u {$user} ssh-keygen -t ed25519 -N '' -f /home/{$user}/.ssh/id_ed25519 -C '{$user}@{$hostname}' 2>/dev/null || true");
+    $suCmd = ($currentUser === 'root') ? "su - {$user} -c" : "sudo -u {$user}";
+    run("{$suCmd} \"ssh-keygen -t ed25519 -N '' -f /home/{$user}/.ssh/id_ed25519 -C '{$user}@{$hostname}' 2>/dev/null || true\"");
 
     info('Configuring restricted sudo access...');
 
@@ -170,18 +175,18 @@ task('provision:bootstrap', function () {
     $sudoersContent .= "{$user} ALL=(postgres) NOPASSWD: /usr/bin/createdb *\n";
     $sudoersContent .= "{$user} ALL=(postgres) NOPASSWD: /usr/bin/dropdb *\n";
 
-    // Write sudoers file
+    // Write sudoers file (using tee to handle both root and sudo scenarios)
     $escapedContent = escapeshellarg($sudoersContent);
-    run("echo {$escapedContent} > /etc/sudoers.d/{$user}");
-    run("chmod 440 /etc/sudoers.d/{$user}");
+    run("echo {$escapedContent} | {$sudo}tee /etc/sudoers.d/{$user} > /dev/null");
+    run("{$sudo}chmod 440 /etc/sudoers.d/{$user}");
 
     // Validate sudoers file
-    run("visudo -c -f /etc/sudoers.d/{$user}");
+    run("{$sudo}visudo -c -f /etc/sudoers.d/{$user}");
 
     $deployPath = get('deploy_path', '~/app');
     $expandedPath = str_replace('~', "/home/{$user}", $deployPath);
-    run("mkdir -p {$expandedPath}");
-    run("chown -R {$user}:{$user} {$expandedPath}");
+    run("{$sudo}mkdir -p {$expandedPath}");
+    run("{$sudo}chown -R {$user}:{$user} {$expandedPath}");
 
     info("User '{$user}' created with SSH access and restricted sudo.");
     info("Deploy path '{$deployPath}' created.");
@@ -196,7 +201,10 @@ task('provision:bootstrap', function () {
 desc('Show current sudo rules for deployer user');
 task('provision:sudo:show', function () {
     $user = get('bootstrap_user');
-    $rules = run("cat /etc/sudoers.d/{$user} 2>/dev/null || echo 'No sudoers file found'");
+    $currentUser = run('whoami');
+    $sudoPrefix = ($currentUser === 'root') ? '' : 'sudo ';
+
+    $rules = run("{$sudoPrefix}cat /etc/sudoers.d/{$user} 2>/dev/null || echo 'No sudoers file found'");
     writeln($rules);
 });
 
@@ -211,7 +219,10 @@ task('provision:sudo:unrestrict', function () {
     }
 
     warning('Granting unrestricted sudo access...');
-    run("echo '{$user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{$user}");
-    run("chmod 440 /etc/sudoers.d/{$user}");
+    $currentUser = run('whoami');
+    $sudoPrefix = ($currentUser === 'root') ? '' : 'sudo ';
+
+    run("echo '{$user} ALL=(ALL) NOPASSWD:ALL' | {$sudoPrefix}tee /etc/sudoers.d/{$user} > /dev/null");
+    run("{$sudoPrefix}chmod 440 /etc/sudoers.d/{$user}");
     warning("Unrestricted sudo enabled for {$user}. Re-run provision:bootstrap to restore restrictions.");
 });
