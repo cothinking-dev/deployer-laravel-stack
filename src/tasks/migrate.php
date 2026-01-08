@@ -10,6 +10,41 @@ set('migrate_backup_keep', 5); // Keep last 5 backups
 set('migrate_timeout', 300); // 5 minutes for migrations
 set('migrate_force', true); // Use --force in production
 
+desc('Ensure SQLite database file exists');
+task('db:ensure-sqlite', function () {
+    $dbConnection = get('db_connection', 'pgsql');
+
+    if ($dbConnection !== 'sqlite') {
+        return;
+    }
+
+    // Get DB_DATABASE from shared_env or env_base
+    $sharedEnv = has('shared_env') ? get('shared_env') : [];
+    $dbPath = $sharedEnv['DB_DATABASE'] ?? 'database/database.sqlite';
+
+    // Resolve relative path from release_path
+    $fullPath = "{{release_path}}/{$dbPath}";
+
+    // Check if file exists
+    if (test("[ -f {$fullPath} ]")) {
+        info("SQLite database already exists: {$dbPath}");
+
+        return;
+    }
+
+    info("Creating SQLite database file: {$dbPath}");
+
+    // Ensure parent directory exists (should already exist via shared_dirs)
+    $parentDir = dirname($fullPath);
+    run("mkdir -p {$parentDir}");
+
+    // Create empty SQLite file
+    run("touch {$fullPath}");
+    run("chmod 664 {$fullPath}");
+
+    info('SQLite database file created');
+});
+
 desc('Run migrations with automatic backup');
 task('migrate:safe', function () {
     if (! get('migrate_enabled', true)) {
@@ -91,61 +126,103 @@ task('migrate:status', function () {
 
 desc('Create database backup');
 task('db:backup', function () {
-    $dbName = get('db_name');
-    $dbUser = get('db_username', 'deployer');
-    $secrets = has('secrets') ? get('secrets') : [];
-    $dbPass = $secrets['db_password'] ?? '';
+    $dbConnection = get('db_connection', 'pgsql');
     $backupPath = get('migrate_backup_path', '{{deploy_path}}/shared/backups');
     $keepBackups = get('migrate_backup_keep', 5);
-
-    if (! $dbName || ! $dbPass) {
-        throw new \RuntimeException('Database credentials not configured');
-    }
+    $timestamp = date('Y-m-d-His');
+    $stage = getStage();
 
     // Create backup directory
     run("mkdir -p {$backupPath}");
 
-    // Generate backup filename
-    $timestamp = date('Y-m-d-His');
-    $stage = getStage();
-    $backupFile = "{$backupPath}/{$dbName}_{$stage}_{$timestamp}.sql.gz";
+    if ($dbConnection === 'sqlite') {
+        // SQLite backup: simple file copy
+        $sharedEnv = has('shared_env') ? get('shared_env') : [];
+        $dbPath = $sharedEnv['DB_DATABASE'] ?? 'database/database.sqlite';
+        $sourcePath = "{{release_path}}/{$dbPath}";
+        $backupFile = "{$backupPath}/database_{$stage}_{$timestamp}.sqlite";
 
-    info("Creating database backup: {$backupFile}");
+        info("Creating SQLite backup: {$backupFile}");
 
-    // Run pg_dump with compression
-    $result = run(
-        "PGPASSWORD='%secret%' pg_dump -h 127.0.0.1 -U {$dbUser} {$dbName} | gzip > {$backupFile} 2>&1 && echo 'BACKUP_OK' || echo 'BACKUP_FAILED'",
-        secret: $dbPass
-    );
+        // Copy SQLite file
+        $result = run("cp {$sourcePath} {$backupFile} 2>&1 && echo 'BACKUP_OK' || echo 'BACKUP_FAILED'");
 
-    if (str_contains($result, 'BACKUP_FAILED')) {
-        run("rm -f {$backupFile}");
+        if (str_contains($result, 'BACKUP_FAILED')) {
+            run("rm -f {$backupFile}");
 
-        throw new \RuntimeException('Database backup failed');
+            throw new \RuntimeException('SQLite backup failed');
+        }
+
+        // Verify backup file
+        $fileSize = run("stat -f%z {$backupFile} 2>/dev/null || stat -c%s {$backupFile} 2>/dev/null || echo '0'");
+
+        if ((int) trim($fileSize) < 100) {
+            run("rm -f {$backupFile}");
+
+            throw new \RuntimeException('Backup file is empty or too small');
+        }
+
+        $sizeKb = round((int) $fileSize / 1024, 2);
+        info("Backup created: {$backupFile} ({$sizeKb} KB)");
+
+        // Clean up old backups
+        cleanupOldBackups($backupPath, 'database', $keepBackups, '.sqlite');
+    } else {
+        // PostgreSQL backup
+        $dbName = get('db_name');
+        $dbUser = get('db_username', 'deployer');
+        $secrets = has('secrets') ? get('secrets') : [];
+        $dbPass = $secrets['db_password'] ?? '';
+
+        if (! $dbName || ! $dbPass) {
+            throw new \RuntimeException('Database credentials not configured');
+        }
+
+        $backupFile = "{$backupPath}/{$dbName}_{$stage}_{$timestamp}.sql.gz";
+
+        info("Creating PostgreSQL backup: {$backupFile}");
+
+        // Run pg_dump with compression
+        $result = run(
+            "PGPASSWORD='%secret%' pg_dump -h 127.0.0.1 -U {$dbUser} {$dbName} | gzip > {$backupFile} 2>&1 && echo 'BACKUP_OK' || echo 'BACKUP_FAILED'",
+            secret: $dbPass
+        );
+
+        if (str_contains($result, 'BACKUP_FAILED')) {
+            run("rm -f {$backupFile}");
+
+            throw new \RuntimeException('Database backup failed');
+        }
+
+        // Verify backup file was created and has content
+        $fileSize = run("stat -f%z {$backupFile} 2>/dev/null || stat -c%s {$backupFile} 2>/dev/null || echo '0'");
+
+        if ((int) trim($fileSize) < 100) {
+            run("rm -f {$backupFile}");
+
+            throw new \RuntimeException('Backup file is empty or too small');
+        }
+
+        $sizeKb = round((int) $fileSize / 1024, 2);
+        info("Backup created: {$backupFile} ({$sizeKb} KB)");
+
+        // Clean up old backups
+        cleanupOldBackups($backupPath, $dbName, $keepBackups, '.sql.gz');
     }
-
-    // Verify backup file was created and has content
-    $fileSize = run("stat -f%z {$backupFile} 2>/dev/null || stat -c%s {$backupFile} 2>/dev/null || echo '0'");
-
-    if ((int) trim($fileSize) < 100) {
-        run("rm -f {$backupFile}");
-
-        throw new \RuntimeException('Backup file is empty or too small');
-    }
-
-    $sizeKb = round((int) $fileSize / 1024, 2);
-    info("Backup created: {$backupFile} ({$sizeKb} KB)");
-
-    // Clean up old backups
-    cleanupOldBackups($backupPath, $dbName, $keepBackups);
 });
 
 /**
  * Remove old backups, keeping only the specified number.
  */
-function cleanupOldBackups(string $backupPath, string $dbName, int $keep): void
+function cleanupOldBackups(string $backupPath, string $dbName, int $keep, string $extension = '.sql.gz'): void
 {
-    $backups = run("ls -1t {$backupPath}/{$dbName}_*.sql.gz 2>/dev/null || echo ''");
+    $pattern = match ($extension) {
+        '.sqlite' => "{$backupPath}/{$dbName}_*.sqlite",
+        '.sql.gz' => "{$backupPath}/{$dbName}_*.sql.gz",
+        default => "{$backupPath}/{$dbName}_*{$extension}",
+    };
+
+    $backups = run("ls -1t {$pattern} 2>/dev/null || echo ''");
     $backupFiles = array_filter(explode("\n", trim($backups)));
 
     if (count($backupFiles) > $keep) {
@@ -162,25 +239,29 @@ function cleanupOldBackups(string $backupPath, string $dbName, int $keep): void
 desc('List available database backups');
 task('db:backups', function () {
     $backupPath = get('migrate_backup_path', '{{deploy_path}}/shared/backups');
+    $dbConnection = get('db_connection', 'pgsql');
 
-    $backups = run("ls -lh {$backupPath}/*.sql.gz 2>/dev/null || echo 'No backups found'");
+    $pattern = $dbConnection === 'sqlite' ? '*.sqlite' : '*.sql.gz';
+    $backups = run("ls -lh {$backupPath}/{$pattern} 2>/dev/null || echo 'No backups found'");
     writeln($backups);
 });
 
 desc('Restore database from backup');
 task('db:restore', function () {
-    $dbName = get('db_name');
-    $dbUser = get('db_username', 'deployer');
-    $secrets = has('secrets') ? get('secrets') : [];
-    $dbPass = $secrets['db_password'] ?? '';
+    $dbConnection = get('db_connection', 'pgsql');
     $backupPath = get('migrate_backup_path', '{{deploy_path}}/shared/backups');
+    $stage = getStage();
 
-    if (! $dbName || ! $dbPass) {
-        throw new \RuntimeException('Database credentials not configured');
+    // List available backups based on database type
+    if ($dbConnection === 'sqlite') {
+        $pattern = "{$backupPath}/database_{$stage}_*.sqlite";
+        $backups = run("ls -1t {$pattern} 2>/dev/null || echo ''");
+    } else {
+        $dbName = get('db_name');
+        $pattern = "{$backupPath}/{$dbName}_{$stage}_*.sql.gz";
+        $backups = run("ls -1t {$pattern} 2>/dev/null || echo ''");
     }
 
-    // List available backups
-    $backups = run("ls -1t {$backupPath}/{$dbName}_*.sql.gz 2>/dev/null || echo ''");
     $backupFiles = array_filter(explode("\n", trim($backups)));
 
     if (empty($backupFiles)) {
@@ -218,16 +299,39 @@ task('db:restore', function () {
 
     info("Restoring from: " . basename($selectedBackup));
 
-    // Restore the backup
-    $result = run(
-        "gunzip -c {$selectedBackup} | PGPASSWORD='%secret%' psql -h 127.0.0.1 -U {$dbUser} {$dbName} 2>&1 && echo 'RESTORE_OK'",
-        secret: $dbPass
-    );
+    // Restore based on database type
+    if ($dbConnection === 'sqlite') {
+        $sharedEnv = has('shared_env') ? get('shared_env') : [];
+        $dbPath = $sharedEnv['DB_DATABASE'] ?? 'database/database.sqlite';
+        $targetPath = "{{deploy_path}}/current/{$dbPath}";
 
-    if (! str_contains($result, 'RESTORE_OK')) {
-        warning('Restore may have encountered issues. Check the output above.');
+        $result = run("cp {$selectedBackup} {$targetPath} 2>&1 && echo 'RESTORE_OK' || echo 'RESTORE_FAILED'");
+
+        if (! str_contains($result, 'RESTORE_OK')) {
+            warning('Restore may have encountered issues. Check the output above.');
+        } else {
+            info('SQLite database restored successfully');
+        }
     } else {
-        info('Database restored successfully');
+        $dbName = get('db_name');
+        $dbUser = get('db_username', 'deployer');
+        $secrets = has('secrets') ? get('secrets') : [];
+        $dbPass = $secrets['db_password'] ?? '';
+
+        if (! $dbName || ! $dbPass) {
+            throw new \RuntimeException('Database credentials not configured');
+        }
+
+        $result = run(
+            "gunzip -c {$selectedBackup} | PGPASSWORD='%secret%' psql -h 127.0.0.1 -U {$dbUser} {$dbName} 2>&1 && echo 'RESTORE_OK'",
+            secret: $dbPass
+        );
+
+        if (! str_contains($result, 'RESTORE_OK')) {
+            warning('Restore may have encountered issues. Check the output above.');
+        } else {
+            info('PostgreSQL database restored successfully');
+        }
     }
 
     // Bring app back up

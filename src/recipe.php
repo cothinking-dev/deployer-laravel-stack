@@ -91,8 +91,11 @@ after('npm:install', 'npm:build');
 // Fix PostgreSQL sequences before migrations to prevent duplicate key errors
 after('npm:build', 'db:fix-sequences');
 
+// Ensure SQLite database file exists before running migrations
+after('db:fix-sequences', 'db:ensure-sqlite');
+
 // Run migrations with backup before going live
-after('db:fix-sequences', 'migrate:safe');
+after('db:ensure-sqlite', 'migrate:safe');
 
 after('deploy:symlink', 'php-fpm:restart');
 after('deploy:symlink', 'artisan:up');
