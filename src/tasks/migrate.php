@@ -18,21 +18,28 @@ task('db:ensure-sqlite', function () {
         return;
     }
 
-    // Get DB_DATABASE from shared_env or env_base
+    // Get DB_DATABASE from shared_env
     $sharedEnv = has('shared_env') ? get('shared_env') : [];
-    $dbPath = $sharedEnv['DB_DATABASE'] ?? 'database/database.sqlite';
+    $dbPath = $sharedEnv['DB_DATABASE'] ?? '';
 
-    // Resolve relative path from release_path
-    $fullPath = "{{release_path}}/{$dbPath}";
-
-    // Check if file exists
-    if (test("[ -f {$fullPath} ]")) {
-        info("SQLite database already exists: {$dbPath}");
+    if (empty($dbPath)) {
+        warning('DB_DATABASE not configured in shared_env for SQLite');
 
         return;
     }
 
-    info("Creating SQLite database file: {$dbPath}");
+    // DB_DATABASE should be an absolute path like {{deploy_path}}/shared/database/database.sqlite
+    // Parse the path to resolve Deployer variables
+    $fullPath = parse($dbPath);
+
+    // Check if file exists
+    if (test("[ -f {$fullPath} ]")) {
+        info("SQLite database already exists: {$fullPath}");
+
+        return;
+    }
+
+    info("Creating SQLite database file: {$fullPath}");
 
     // Ensure parent directory exists (should already exist via shared_dirs)
     $parentDir = dirname($fullPath);
@@ -138,8 +145,14 @@ task('db:backup', function () {
     if ($dbConnection === 'sqlite') {
         // SQLite backup: simple file copy
         $sharedEnv = has('shared_env') ? get('shared_env') : [];
-        $dbPath = $sharedEnv['DB_DATABASE'] ?? 'database/database.sqlite';
-        $sourcePath = "{{release_path}}/{$dbPath}";
+        $dbPath = $sharedEnv['DB_DATABASE'] ?? '';
+
+        if (empty($dbPath)) {
+            throw new \RuntimeException('DB_DATABASE not configured in shared_env for SQLite');
+        }
+
+        // Parse the absolute path
+        $sourcePath = parse($dbPath);
         $backupFile = "{$backupPath}/database_{$stage}_{$timestamp}.sqlite";
 
         info("Creating SQLite backup: {$backupFile}");
@@ -302,8 +315,14 @@ task('db:restore', function () {
     // Restore based on database type
     if ($dbConnection === 'sqlite') {
         $sharedEnv = has('shared_env') ? get('shared_env') : [];
-        $dbPath = $sharedEnv['DB_DATABASE'] ?? 'database/database.sqlite';
-        $targetPath = "{{deploy_path}}/current/{$dbPath}";
+        $dbPath = $sharedEnv['DB_DATABASE'] ?? '';
+
+        if (empty($dbPath)) {
+            throw new \RuntimeException('DB_DATABASE not configured in shared_env for SQLite');
+        }
+
+        // Parse the absolute path (will use current symlink which points to active release)
+        $targetPath = parse($dbPath);
 
         $result = run("cp {$selectedBackup} {$targetPath} 2>&1 && echo 'RESTORE_OK' || echo 'RESTORE_FAILED'");
 

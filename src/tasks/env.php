@@ -20,6 +20,12 @@ set('env_base', function () {
     $secrets = get('secrets');
     $dbConnection = get('db_connection', 'pgsql');
 
+    // For SQLite, DB_DATABASE will be set in shared_env as an absolute path
+    // For PostgreSQL/MySQL, use db_name
+    $dbDatabase = $dbConnection === 'sqlite'
+        ? '' // Will be overridden by shared_env
+        : get('db_name');
+
     return [
         'APP_NAME' => get('application', 'Laravel'),
         'APP_ENV' => get('app_env', 'production'),
@@ -42,7 +48,7 @@ set('env_base', function () {
         'DB_CONNECTION' => $dbConnection,
         'DB_HOST' => get('db_host', '127.0.0.1'),
         'DB_PORT' => get('db_port'),
-        'DB_DATABASE' => get('db_name'),
+        'DB_DATABASE' => $dbDatabase,
         'DB_USERNAME' => get('db_username', 'deployer'),
         'DB_PASSWORD' => $secrets['db_password'] ?? '',
 

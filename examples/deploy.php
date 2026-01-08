@@ -57,7 +57,7 @@ set('db_connection', 'pgsql');
 // For SQLite:
 // set('db_connection', 'sqlite');
 // Add to shared_env below:
-//   'DB_DATABASE' => 'database/database.sqlite',
+//   'DB_DATABASE' => '{{deploy_path}}/shared/database/database.sqlite', // Absolute path required
 // Add to shared_dirs:
 //   add('shared_dirs', ['database']);
 //   add('writable_dirs', ['database']);
