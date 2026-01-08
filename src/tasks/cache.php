@@ -44,3 +44,22 @@ task('artisan:cache:refresh', [
     'artisan:cache:clear-all',
     'artisan:cache:rebuild',
 ]);
+
+desc('Check if vendor directory needs refresh based on composer.lock');
+task('composer:check-cache', function () {
+    $lockHash = run('md5sum {{release_path}}/composer.lock 2>/dev/null | cut -d" " -f1 || echo ""');
+    $vendorHash = run('cat {{release_path}}/vendor/.composer-lock-hash 2>/dev/null || echo ""');
+
+    if (trim($lockHash) === trim($vendorHash)) {
+        info('composer.lock unchanged, vendor directory is current');
+        set('composer_cache_valid', true);
+    } else {
+        info('composer.lock changed, will reinstall dependencies');
+        set('composer_cache_valid', false);
+    }
+});
+
+desc('Save composer.lock hash after install');
+task('composer:save-hash', function () {
+    run('md5sum {{release_path}}/composer.lock | cut -d" " -f1 > {{release_path}}/vendor/.composer-lock-hash');
+});

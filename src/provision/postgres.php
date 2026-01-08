@@ -102,6 +102,15 @@ task('postgres:status', function () {
 
 desc('Fix PostgreSQL sequences to prevent duplicate key errors');
 task('db:fix-sequences', function () {
+    // Skip if not using PostgreSQL
+    $dbConnection = get('db_connection', 'pgsql');
+
+    if ($dbConnection !== 'pgsql') {
+        info("Skipping sequence fix (database: {$dbConnection})");
+
+        return;
+    }
+
     $dbPass = getSecret('db_password');
     $dbName = get('db_name');
     $dbUser = get('db_username', 'deployer');

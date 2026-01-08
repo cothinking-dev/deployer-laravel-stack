@@ -56,6 +56,8 @@ task('deploy:preflight', function () {
     $memThreshold = get('preflight_memory_threshold_mb', 512);
     $deployPath = get('deploy_path');
     $domain = get('domain', '');
+    $backupPath = get('migrate_backup_path', '{{deploy_path}}/shared/backups');
+    $backupEnabled = get('migrate_backup_enabled', true) ? 'true' : 'false';
 
     // Build batched remote script - single SSH call for all system checks
     $remoteScript = <<<BASH
@@ -127,6 +129,20 @@ else
     echo "PREFLIGHT|Redis Connection|FAIL|Redis not responding"
 fi
 
+# Backup path disk space check (if backups enabled)
+backup_path="{$backupPath}"
+if [[ "{$backupEnabled}" == "true" ]]; then
+    # Create backup directory if it doesn't exist for the check
+    mkdir -p "\$backup_path" 2>/dev/null || true
+    backup_disk=\$(df -BM "\$backup_path" 2>/dev/null | tail -1 | awk '{print \$4}' | tr -d 'M' || echo "0")
+    backup_threshold=512  # 512MB minimum for backups
+    if [[ "\$backup_disk" -ge \$backup_threshold ]]; then
+        echo "PREFLIGHT|Backup Space|PASS|Available: \${backup_disk}MB (threshold: \${backup_threshold}MB)"
+    else
+        echo "PREFLIGHT|Backup Space|FAIL|Only \${backup_disk}MB available for backups, need at least \${backup_threshold}MB"
+    fi
+fi
+
 # Caddy check (if domain configured)
 if [[ -n "{$domain}" ]]; then
     caddy_status=\$(systemctl is-active caddy 2>/dev/null || echo 'inactive')
@@ -144,6 +160,9 @@ BASH;
 
     // Process results
     $requiredChecks = ['PHP-FPM', 'Redis', 'PostgreSQL', 'Disk Space', 'Memory', 'Deploy Path', 'Redis Connection'];
+    if (get('migrate_backup_enabled', true)) {
+        $requiredChecks[] = 'Backup Space';
+    }
     if ($domain) {
         $requiredChecks[] = 'Caddy';
     }

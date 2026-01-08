@@ -2,8 +2,23 @@
 
 namespace Deployer;
 
+// Database configuration
+set('db_connection', 'pgsql'); // Default: PostgreSQL
+set('db_host', '127.0.0.1');
+set('db_port', function () {
+    $connection = get('db_connection', 'pgsql');
+
+    return match ($connection) {
+        'mysql' => '3306',
+        'pgsql' => '5432',
+        'sqlite' => null,
+        default => '5432',
+    };
+});
+
 set('env_base', function () {
     $secrets = get('secrets');
+    $dbConnection = get('db_connection', 'pgsql');
 
     return [
         'APP_NAME' => get('application', 'Laravel'),
@@ -24,9 +39,9 @@ set('env_base', function () {
         'LOG_DEPRECATIONS_CHANNEL' => 'null',
         'LOG_LEVEL' => get('log_level', 'error'),
 
-        'DB_CONNECTION' => 'pgsql',
-        'DB_HOST' => '127.0.0.1',
-        'DB_PORT' => '5432',
+        'DB_CONNECTION' => $dbConnection,
+        'DB_HOST' => get('db_host', '127.0.0.1'),
+        'DB_PORT' => get('db_port'),
         'DB_DATABASE' => get('db_name'),
         'DB_USERNAME' => get('db_username', 'deployer'),
         'DB_PASSWORD' => $secrets['db_password'] ?? '',
@@ -106,6 +121,19 @@ function validateEnvFile(string $path): array
     if (preg_match_all('/^(\w+)=\{(\w+)\}/m', $content, $matches, PREG_SET_ORDER)) {
         foreach ($matches as $match) {
             $issues[] = "Unresolved placeholder: {$match[1]}={$match[0]}";
+        }
+    }
+
+    // Check APP_KEY format
+    if (preg_match('/^APP_KEY=(.+)$/m', $content, $matches)) {
+        $appKey = trim($matches[1]);
+
+        // Remove quotes if present
+        $appKey = trim($appKey, '"\'');
+
+        // Validate format: should be base64:... and at least 32 chars after base64:
+        if (! empty($appKey) && ! preg_match('/^base64:.{32,}$/', $appKey)) {
+            $issues[] = 'Invalid APP_KEY format (should be base64:... with at least 32 characters)';
         }
     }
 

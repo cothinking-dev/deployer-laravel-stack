@@ -35,10 +35,34 @@ host('server')
 // add('writable_dirs', ['custom-uploads']);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Database
+// Database Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Uncomment to create additional databases during provisioning:
+// Database connection type (default: 'pgsql')
+// Supported: 'pgsql', 'mysql', 'sqlite'
+set('db_connection', 'pgsql');
+
+// For PostgreSQL (default):
+// set('db_connection', 'pgsql');
+// set('db_name', 'myapp');
+// set('db_username', 'deployer');
+// set('db_port', '5432'); // Optional, auto-detected based on connection type
+
+// For MySQL:
+// set('db_connection', 'mysql');
+// set('db_name', 'myapp');
+// set('db_username', 'deployer');
+// set('db_port', '3306'); // Optional, auto-detected
+
+// For SQLite:
+// set('db_connection', 'sqlite');
+// Add to shared_env below:
+//   'DB_DATABASE' => 'database/database.sqlite',
+// Add to shared_dirs:
+//   add('shared_dirs', ['database']);
+//   add('writable_dirs', ['database']);
+
+// PostgreSQL-specific: Create additional databases during provisioning
 // set('additional_databases', ['myapp_staging']);
 
 // ─────────────────────────────────────────────────────────────────────────────
