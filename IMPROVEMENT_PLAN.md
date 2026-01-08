@@ -245,23 +245,32 @@ Add after line 89:
 
 **File**: `examples/deploy.php`
 
-Add SQLite example configuration:
+Add comprehensive database configuration examples:
+
 ```php
 // ─────────────────────────────────────────────────────────────────────────────
 // Database Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-// For PostgreSQL (default)
-// set('db_connection', 'pgsql');
-// set('db_name', 'myapp');
+// PostgreSQL (default)
+set('db_connection', 'pgsql');
+set('db_name', 'myapp');
+set('db_username', 'deployer');
+// Port auto-detected: 5432
 
-// For SQLite
-// set('db_connection', 'sqlite');
-// Add to shared_env: 'DB_DATABASE' => 'database/database.sqlite'
-
-// For MySQL
+// MySQL
 // set('db_connection', 'mysql');
-// set('db_port', '3306');
+// set('db_name', 'myapp');
+// set('db_username', 'deployer');
+// Port auto-detected: 3306
+
+// SQLite
+// set('db_connection', 'sqlite');
+// Add to shared_env below:
+//   'DB_DATABASE' => '{{deploy_path}}/shared/database/database.sqlite', // Absolute path required
+// Add to shared_dirs:
+//   add('shared_dirs', ['database']);
+//   add('writable_dirs', ['database']);
 ```
 
 ---
@@ -286,22 +295,26 @@ Before merging improvements:
 **No breaking changes.** All improvements are backward compatible:
 
 1. Existing PostgreSQL projects: No changes needed, works as before
-2. Existing SQLite projects: Will benefit from proper sequence skipping
+2. Existing SQLite projects: **Must update** to use absolute path (see below)
 3. New projects: Can use `set('db_connection', 'sqlite')` for cleaner config
 
-**Optional Migration**:
+**Required Migration for SQLite Projects**:
 ```php
-// Old way (still works)
+// ❌ Old way (will cause "database file does not exist" error)
 set('shared_env', [
     'DB_CONNECTION' => 'sqlite',
-    'DB_DATABASE' => 'database/database.sqlite',
+    'DB_DATABASE' => 'database/database.sqlite', // Relative path - WRONG
 ]);
 
-// New way (cleaner)
+// ✅ New way (required)
 set('db_connection', 'sqlite');
 set('shared_env', [
-    'DB_DATABASE' => 'database/database.sqlite',
+    'DB_DATABASE' => '{{deploy_path}}/shared/database/database.sqlite', // Absolute path - CORRECT
 ]);
+
+// Also ensure database directory is shared:
+add('shared_dirs', ['database']);
+add('writable_dirs', ['database']);
 ```
 
 ---
