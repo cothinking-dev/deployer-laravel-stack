@@ -18,7 +18,6 @@ fi
 # Project Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-export DEPLOYER_SECRETS_FILE="${DEPLOYER_SECRETS_FILE:-deploy/secrets.tpl}"
 export DEPLOYER_ENVIRONMENTS="${DEPLOYER_ENVIRONMENTS:-prod staging server}"
 export DEPLOYER_PROD_ENVIRONMENTS="${DEPLOYER_PROD_ENVIRONMENTS:-prod staging}"
 export DEPLOYER_APP_NAME="${DEPLOYER_APP_NAME:-My Application}"

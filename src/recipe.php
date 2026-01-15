@@ -13,19 +13,27 @@ require __DIR__.'/tasks/preflight.php';
 require __DIR__.'/tasks/rollback.php';
 require __DIR__.'/tasks/migrate.php';
 require __DIR__.'/tasks/cache.php';
+require __DIR__.'/tasks/init.php';
 require __DIR__.'/provision/bootstrap.php';
 require __DIR__.'/provision/firewall.php';
 require __DIR__.'/provision/php.php';
 require __DIR__.'/provision/composer.php';
 require __DIR__.'/provision/node.php';
 require __DIR__.'/provision/postgres.php';
+require __DIR__.'/provision/mysql.php';
+require __DIR__.'/provision/sqlite.php';
+require __DIR__.'/provision/database.php';
 require __DIR__.'/provision/redis.php';
 require __DIR__.'/provision/caddy.php';
+require __DIR__.'/provision/octane.php';
 require __DIR__.'/provision/fail2ban.php';
 
 set('php_version', '8.4');
 set('node_version', '22');
 set('db_username', 'deployer');
+
+// Web server mode: 'fpm' (PHP-FPM) or 'octane' (Laravel Octane with FrankenPHP)
+set('web_server', 'fpm');
 
 // Default timeout for commands (5 minutes)
 set('default_timeout', 300);
@@ -101,7 +109,19 @@ after('db:fix-sequences', 'db:ensure-sqlite');
 // Run migrations with backup before going live
 after('db:ensure-sqlite', 'migrate:safe');
 
-after('deploy:symlink', 'php-fpm:restart');
+// Reload web server (PHP-FPM or Octane depending on web_server config)
+desc('Reload web server for new code');
+task('webserver:reload', function () {
+    $webServer = get('web_server', 'fpm');
+
+    if ($webServer === 'octane') {
+        invoke('octane:reload');
+    } else {
+        invoke('php-fpm:restart');
+    }
+});
+
+after('deploy:symlink', 'webserver:reload');
 after('deploy:symlink', 'artisan:up');
 
 // Clear and rebuild caches after app is live

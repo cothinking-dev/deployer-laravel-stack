@@ -44,8 +44,11 @@ task('caddy:configure', function () {
     $phpVersion = get('php_version', '8.4');
     // tls_mode: 'auto' (Let's Encrypt), 'internal' (self-signed, for Cloudflare proxy), or custom cert path
     $tlsMode = get('tls_mode', 'auto');
+    // web_server: 'fpm' (PHP-FPM) or 'octane' (Laravel Octane/FrankenPHP)
+    $webServer = get('web_server', 'fpm');
+    $octanePort = get('octane_port', 8000);
 
-    if (! $domain) {
+    if (!$domain) {
         throw new \RuntimeException('domain option is required for Caddy configuration');
     }
 
@@ -53,18 +56,62 @@ task('caddy:configure', function () {
     $fullPath = str_replace('~', $homePath, $deployPath);
     $safeDomain = str_replace('.', '-', $domain);
 
-    info("Configuring Caddy for: {$domain} (TLS: {$tlsMode})");
+    info("Configuring Caddy for: {$domain} (TLS: {$tlsMode}, Server: {$webServer})");
 
     // Build TLS directive
     $tlsDirective = '';
     if ($tlsMode === 'internal') {
         $tlsDirective = '    tls internal';
-    } elseif ($tlsMode !== 'auto' && ! empty($tlsMode)) {
+    } elseif ($tlsMode !== 'auto' && !empty($tlsMode)) {
         // Custom cert path
         $tlsDirective = "    tls {$tlsMode}";
     }
 
-    $siteConfig = <<<CADDY
+    // Build backend configuration based on web server type
+    if ($webServer === 'octane') {
+        // Octane mode: reverse proxy to FrankenPHP
+        $siteConfig = <<<CADDY
+{$domain} {
+{$tlsDirective}
+    encode gzip
+
+    # Static files served directly
+    @static {
+        file
+        path *.ico *.css *.js *.gif *.jpg *.jpeg *.png *.svg *.woff *.woff2 *.webp
+    }
+    handle @static {
+        root * {$fullPath}/current/public
+        file_server
+    }
+
+    # All other requests to Octane
+    handle {
+        reverse_proxy localhost:{$octanePort} {
+            health_uri /up
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/{$domain}.log
+        format json
+    }
+}
+CADDY;
+    } else {
+        // PHP-FPM mode (default)
+        $siteConfig = <<<CADDY
 {$domain} {
 {$tlsDirective}
     root * {$fullPath}/current/public
@@ -90,6 +137,7 @@ task('caddy:configure', function () {
     }
 }
 CADDY;
+    }
 
     sudo('mkdir -p /etc/caddy/sites-enabled');
 

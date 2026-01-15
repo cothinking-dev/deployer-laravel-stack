@@ -113,3 +113,66 @@ INI;
 
 // Run FPM config after OPcache during provisioning
 after('php:opcache', 'php:fpm-config');
+
+desc('Configure PHP-FPM pool with explicit user/group settings');
+task('php:fpm-pool', function () {
+    $version = get('php_version', '8.4');
+    $poolPath = "/etc/php/{$version}/fpm/pool.d/www.conf";
+
+    info('Configuring PHP-FPM pool...');
+
+    // Create explicit pool configuration
+    $config = <<<'INI'
+[www]
+; User/Group configuration
+user = www-data
+group = www-data
+
+; Socket configuration
+listen = /var/run/php/php{VERSION}-fpm.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+; Process manager settings
+pm = dynamic
+pm.max_children = 50
+pm.start_servers = 5
+pm.min_spare_servers = 5
+pm.max_spare_servers = 35
+pm.max_requests = 500
+
+; Error logging
+php_admin_flag[log_errors] = on
+php_admin_value[error_log] = /var/log/php-fpm/www-error.log
+
+; Security
+security.limit_extensions = .php
+INI;
+
+    // Replace {VERSION} placeholder
+    $config = str_replace('{VERSION}', $version, $config);
+
+    // Create log directory
+    sudo('mkdir -p /var/log/php-fpm');
+    sudo('chown www-data:www-data /var/log/php-fpm');
+
+    // Write pool configuration
+    sudo("tee {$poolPath} > /dev/null << 'EOF'\n{$config}\nEOF");
+    sudo("systemctl restart php{$version}-fpm");
+
+    info('PHP-FPM pool configured with www-data user/group');
+});
+
+desc('Show PHP-FPM pool status');
+task('php:fpm-pool:status', function () {
+    $version = get('php_version', '8.4');
+
+    // Check pool process
+    $processes = run("ps aux | grep 'php-fpm.*pool www' | grep -v grep || echo 'No pool processes found'");
+    writeln($processes);
+
+    // Check socket
+    $socket = run("ls -la /var/run/php/php{$version}-fpm.sock 2>/dev/null || echo 'Socket not found'");
+    writeln($socket);
+});

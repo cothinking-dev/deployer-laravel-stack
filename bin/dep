@@ -1,5 +1,6 @@
 #!/bin/bash
-# Deployer wrapper with 1Password integration
+# Deployer wrapper with secrets management
+# Supports both 1Password CLI and plain .env file modes
 # Usage: dep <command> <environment>
 
 set -eo pipefail
@@ -28,7 +29,6 @@ PROJECT_DIR="$(find_project_root)" || {
 
 cd "$PROJECT_DIR"
 
-readonly SECRETS_FILE="${DEPLOYER_SECRETS_FILE:-deploy/secrets.tpl}"
 readonly ENVIRONMENTS="${DEPLOYER_ENVIRONMENTS:-prod staging server}"
 readonly PROD_ENVS="${DEPLOYER_PROD_ENVIRONMENTS:-prod staging}"
 readonly APP_NAME="${DEPLOYER_APP_NAME:-Application}"
@@ -80,6 +80,25 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Detect Secrets Mode
+# ─────────────────────────────────────────────────────────────────────────────
+
+SECRETS_MODE=""
+SECRETS_FILE=""
+
+if [[ -f "deploy/secrets.tpl" && -f "deploy/secrets.env" ]]; then
+    error "Both deploy/secrets.tpl and deploy/secrets.env exist.\nRemove one to resolve the conflict."
+elif [[ -f "deploy/secrets.tpl" ]]; then
+    SECRETS_MODE="1password"
+    SECRETS_FILE="deploy/secrets.tpl"
+elif [[ -f "deploy/secrets.env" ]]; then
+    SECRETS_MODE="env"
+    SECRETS_FILE="deploy/secrets.env"
+else
+    error "No secrets file found.\nCreate deploy/secrets.tpl (for 1Password) or deploy/secrets.env (for plain .env).\nRun 'vendor/bin/dep init' to set up your project."
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Parse Arguments
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -111,24 +130,34 @@ fi
 # Validate Prerequisites
 # ─────────────────────────────────────────────────────────────────────────────
 
-[[ -f "$SECRETS_FILE" ]] || error "Secrets file not found: $SECRETS_FILE"
 [[ -f "vendor/bin/dep" ]] || error "Deployer not installed. Run: composer install"
 
-command -v op >/dev/null 2>&1 || error "1Password CLI (op) not installed.\nInstall: brew install 1password-cli"
-command -v gh >/dev/null 2>&1 || error "GitHub CLI (gh) not installed.\nInstall: brew install gh"
+if [[ "$SECRETS_MODE" == "1password" ]]; then
+    command -v op >/dev/null 2>&1 || error "1Password CLI (op) not installed.\nInstall: brew install 1password-cli"
+fi
+
+# GitHub CLI is optional - warn but don't fail
+if ! command -v gh >/dev/null 2>&1; then
+    warn "GitHub CLI (gh) not installed. Some features may not work."
+    warn "Install with: brew install gh"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Authenticate
 # ─────────────────────────────────────────────────────────────────────────────
 
-if ! op account list &>/dev/null 2>&1; then
-    info "Signing in to 1Password..."
-    eval "$(op signin)"
+if [[ "$SECRETS_MODE" == "1password" ]]; then
+    if ! op account list &>/dev/null 2>&1; then
+        info "Signing in to 1Password..."
+        eval "$(op signin)"
+    fi
 fi
 
-if ! gh auth status &>/dev/null 2>&1; then
-    info "Authenticating with GitHub..."
-    gh auth login
+if command -v gh >/dev/null 2>&1; then
+    if ! gh auth status &>/dev/null 2>&1; then
+        info "Authenticating with GitHub..."
+        gh auth login
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,13 +169,22 @@ DEPLOYER_ENV="$ENV"
 
 export DEPLOYER_ENV
 info "Environment: $DEPLOYER_ENV"
+info "Secrets mode: $SECRETS_MODE"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Run Deployer
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_deployer() {
-    op run --cache=false --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
+    if [[ "$SECRETS_MODE" == "1password" ]]; then
+        op run --cache=false --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
+    else
+        # Source env file and run deployer
+        set -a
+        source "$SECRETS_FILE"
+        set +a
+        vendor/bin/dep "$@"
+    fi
 }
 
 case "$COMMAND" in
