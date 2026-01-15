@@ -61,6 +61,30 @@ task('migrate:safe', function () {
     }
 
     $backupEnabled = get('migrate_backup_enabled', true);
+    $dbConnection = get('db_connection', 'pgsql');
+
+    // For SQLite, check if the database file is empty (fresh database needs migrations)
+    if ($dbConnection === 'sqlite') {
+        $sharedEnv = has('shared_env') ? get('shared_env') : [];
+        $dbPath = $sharedEnv['DB_DATABASE'] ?? '';
+
+        if (! empty($dbPath)) {
+            $fullPath = parse($dbPath);
+            $fileSize = run("stat -f%z {$fullPath} 2>/dev/null || stat -c%s {$fullPath} 2>/dev/null || echo '0'");
+
+            if ((int) trim($fileSize) === 0) {
+                info('Fresh SQLite database detected, running migrations...');
+                $force = get('migrate_force', true) ? ' --force' : '';
+                $timeout = get('migrate_timeout', 300);
+
+                $output = run("cd {{release_path}} && {{bin/php}} artisan migrate{$force} 2>&1", timeout: $timeout);
+                writeln($output);
+                info('Migrations completed successfully');
+
+                return;
+            }
+        }
+    }
 
     // Check if there are pending migrations
     $status = run('cd {{release_path}} && {{bin/php}} artisan migrate:status --pending 2>&1 || echo "NO_PENDING"');
