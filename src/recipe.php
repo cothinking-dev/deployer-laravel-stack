@@ -85,7 +85,11 @@ before('deploy:shared', 'deploy:env');
 before('deploy:symlink', 'deploy:fix-permissions');
 before('deploy:symlink', 'artisan:down');
 before('deploy:symlink', 'horizon:terminate');
-after('deploy:vendors', 'npm:install');
+// Rebuild config cache immediately after vendors to ensure fresh .env values
+// This prevents stale cached config from previous releases affecting database operations
+after('deploy:vendors', 'artisan:config:fresh');
+
+after('artisan:config:fresh', 'npm:install');
 after('npm:install', 'npm:build');
 
 // Fix PostgreSQL sequences before migrations to prevent duplicate key errors

@@ -45,6 +45,18 @@ task('artisan:cache:refresh', [
     'artisan:cache:rebuild',
 ]);
 
+desc('Rebuild config cache for new release (run before database operations)');
+task('artisan:config:fresh', function () {
+    within('{{release_path}}', function () {
+        // Clear any stale config cache from shared storage
+        run('{{bin/php}} artisan config:clear', timeout: 30);
+
+        // Rebuild config cache with new release's .env values
+        runWithRetry('{{bin/php}} artisan config:cache', maxAttempts: 3, delaySeconds: 2);
+    });
+    info('Config cache refreshed for new release');
+});
+
 desc('Check if vendor directory needs refresh based on composer.lock');
 task('composer:check-cache', function () {
     $lockHash = run('md5sum {{release_path}}/composer.lock 2>/dev/null | cut -d" " -f1 || echo ""');
