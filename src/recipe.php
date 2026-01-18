@@ -2,6 +2,7 @@
 
 namespace Deployer;
 
+require_once __DIR__.'/constants.php';
 require_once __DIR__.'/helpers.php';
 require_once __DIR__.'/tasks/env.php';
 require __DIR__.'/tasks/npm.php';
@@ -14,6 +15,7 @@ require __DIR__.'/tasks/rollback.php';
 require __DIR__.'/tasks/migrate.php';
 require __DIR__.'/tasks/cache.php';
 require __DIR__.'/tasks/init.php';
+require __DIR__.'/tasks/data-migrate.php';
 require __DIR__.'/provision/bootstrap.php';
 require __DIR__.'/provision/firewall.php';
 require __DIR__.'/provision/php.php';
@@ -30,10 +32,11 @@ require __DIR__.'/provision/fail2ban.php';
 
 set('php_version', '8.4');
 set('node_version', '22');
+set('db_connection', DbConnection::DEFAULT);  // 'sqlite' - zero config, perfect for most Laravel apps
 set('db_username', 'deployer');
 
 // Web server mode: 'fpm' (PHP-FPM) or 'octane' (Laravel Octane with FrankenPHP)
-set('web_server', 'fpm');
+set('web_server', WebServer::DEFAULT);  // 'fpm'
 
 // Default timeout for commands (5 minutes)
 set('default_timeout', 300);
@@ -112,9 +115,9 @@ after('db:ensure-sqlite', 'migrate:safe');
 // Reload web server (PHP-FPM or Octane depending on web_server config)
 desc('Reload web server for new code');
 task('webserver:reload', function () {
-    $webServer = get('web_server', 'fpm');
+    $webServer = get('web_server', WebServer::DEFAULT);
 
-    if ($webServer === 'octane') {
+    if ($webServer === WebServer::OCTANE) {
         invoke('octane:reload');
     } else {
         invoke('php-fpm:restart');

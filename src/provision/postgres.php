@@ -12,6 +12,10 @@ task('provision:postgres', function () {
         throw new \RuntimeException('db_name option is required for PostgreSQL setup');
     }
 
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
+
     info('Installing PostgreSQL...');
 
     sudo('apt-get update');
@@ -60,6 +64,10 @@ task('postgres:create-db', function () {
         throw new \RuntimeException('db_name option is required');
     }
 
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
+
     info("Creating database: {$dbName}");
     createDatabase($dbName, $dbUser);
     info("Database created: {$dbName}");
@@ -77,6 +85,10 @@ task('db:check', function () {
     $dbName = get('db_name');
     $dbUser = get('db_username', 'deployer');
 
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
+
     info("Testing connection to database: {$dbName}");
 
     $result = run("PGPASSWORD='%secret%' psql -h 127.0.0.1 -U {$dbUser} -d {$dbName} -c '\\dt' 2>&1", secret: $dbPass);
@@ -89,6 +101,9 @@ desc('Reset database user password');
 task('db:reset-password', function () {
     $dbPass = getSecret('db_password');
     $dbUser = get('db_username', 'deployer');
+
+    // Validate inputs to prevent command injection
+    $dbUser = validateUsername($dbUser);
 
     run("sudo -u postgres psql -c \"ALTER USER {$dbUser} WITH PASSWORD '%secret%';\"", secret: $dbPass);
     info("Password reset for user: {$dbUser}");
@@ -103,9 +118,9 @@ task('postgres:status', function () {
 desc('Fix PostgreSQL sequences to prevent duplicate key errors');
 task('db:fix-sequences', function () {
     // Skip if not using PostgreSQL
-    $dbConnection = get('db_connection', 'pgsql');
+    $dbConnection = get('db_connection', DbConnection::DEFAULT);
 
-    if ($dbConnection !== 'pgsql') {
+    if ($dbConnection !== DbConnection::PGSQL) {
         info("Skipping sequence fix (database: {$dbConnection})");
 
         return;
@@ -114,6 +129,10 @@ task('db:fix-sequences', function () {
     $dbPass = getSecret('db_password');
     $dbName = get('db_name');
     $dbUser = get('db_username', 'deployer');
+
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
 
     info("Fixing PostgreSQL sequences for: {$dbName}");
 

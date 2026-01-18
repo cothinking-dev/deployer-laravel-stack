@@ -12,6 +12,10 @@ task('provision:mysql', function () {
         throw new \RuntimeException('db_name option is required for MySQL setup');
     }
 
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
+
     info('Installing MySQL...');
 
     sudo('apt-get update');
@@ -70,6 +74,10 @@ task('mysql:database', function () {
         throw new \RuntimeException('db_name option is required');
     }
 
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
+
     info("Creating database: {$dbName}");
     createMysqlDatabase($dbName, $dbUser);
     info("Database created: {$dbName}");
@@ -79,6 +87,9 @@ desc('Create MySQL user with password');
 task('mysql:user', function () {
     $dbPass = getSecret('db_password');
     $dbUser = get('db_username', 'deployer');
+
+    // Validate inputs to prevent command injection
+    $dbUser = validateUsername($dbUser);
 
     info("Creating MySQL user: {$dbUser}");
 
@@ -109,6 +120,10 @@ task('mysql:check', function () {
     $dbName = get('db_name');
     $dbUser = get('db_username', 'deployer');
 
+    // Validate inputs to prevent command injection
+    $dbName = validateDbName($dbName);
+    $dbUser = validateUsername($dbUser);
+
     info("Testing connection to database: {$dbName}");
 
     $result = run("mysql -h 127.0.0.1 -u {$dbUser} -p'%secret%' -e 'SHOW TABLES;' {$dbName} 2>&1", secret: $dbPass);
@@ -121,6 +136,9 @@ desc('Reset MySQL user password');
 task('mysql:reset-password', function () {
     $dbPass = getSecret('db_password');
     $dbUser = get('db_username', 'deployer');
+
+    // Validate inputs to prevent command injection
+    $dbUser = validateUsername($dbUser);
 
     $alterUser = "ALTER USER '{$dbUser}'@'localhost' IDENTIFIED BY '%secret%';";
     run("sudo mysql -e \"{$alterUser}\"", secret: $dbPass);

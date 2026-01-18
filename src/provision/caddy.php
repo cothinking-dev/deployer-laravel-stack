@@ -45,12 +45,16 @@ task('caddy:configure', function () {
     // tls_mode: 'auto' (Let's Encrypt), 'internal' (self-signed, for Cloudflare proxy), or custom cert path
     $tlsMode = get('tls_mode', 'auto');
     // web_server: 'fpm' (PHP-FPM) or 'octane' (Laravel Octane/FrankenPHP)
-    $webServer = get('web_server', 'fpm');
+    $webServer = get('web_server', WebServer::DEFAULT);
     $octanePort = get('octane_port', 8000);
 
     if (!$domain) {
         throw new \RuntimeException('domain option is required for Caddy configuration');
     }
+
+    // Validate inputs to prevent command injection
+    $domain = validateDomain($domain);
+    $deployPath = validateDeployPath($deployPath);
 
     $homePath = run('echo $HOME');
     $fullPath = str_replace('~', $homePath, $deployPath);
@@ -68,7 +72,7 @@ task('caddy:configure', function () {
     }
 
     // Build backend configuration based on web server type
-    if ($webServer === 'octane') {
+    if ($webServer === WebServer::OCTANE) {
         // Octane mode: reverse proxy to FrankenPHP
         $siteConfig = <<<CADDY
 {$domain} {

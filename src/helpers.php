@@ -273,8 +273,12 @@ function getAvailableMemoryMb(): int
  *
  * @throws \RuntimeException If all attempts fail
  */
-function runWithRetry(string $command, int $maxAttempts = 3, int $delaySeconds = 2): string
-{
+function runWithRetry(
+    string $command,
+    int $maxAttempts = 3,
+    int $delaySeconds = 2,
+    ?callable $onFailure = null
+): string {
     $lastException = null;
 
     for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
@@ -290,7 +294,120 @@ function runWithRetry(string $command, int $maxAttempts = 3, int $delaySeconds =
         }
     }
 
+    if ($onFailure !== null) {
+        $onFailure($lastException);
+        return '';
+    }
+
     throw new \RuntimeException(
-        "Command failed after {$maxAttempts} attempts: " . $lastException->getMessage()
+        "Command failed after {$maxAttempts} attempts: " . $lastException->getMessage(),
+        0,
+        $lastException
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Input Validation Helpers - Prevent command injection in shell-interpolated values
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Validate and sanitize values that will be interpolated into shell commands.
+ *
+ * @param string $value The value to validate
+ * @param string $context Description for error messages
+ * @param string $pattern Regex pattern for valid values
+ * @return string The validated value
+ * @throws \InvalidArgumentException If validation fails
+ */
+function validateShellInput(string $value, string $context, string $pattern = '/^[a-zA-Z0-9._-]+$/'): string
+{
+    if ($value === '') {
+        throw new \InvalidArgumentException("Empty {$context} is not allowed");
+    }
+
+    if (!preg_match($pattern, $value)) {
+        throw new \InvalidArgumentException(
+            "Invalid {$context}: '{$value}'. Must match pattern: {$pattern}"
+        );
+    }
+
+    return $value;
+}
+
+/**
+ * Validate domain name format.
+ *
+ * @param string $domain The domain to validate
+ * @return string The validated domain
+ * @throws \InvalidArgumentException If validation fails
+ */
+function validateDomain(string $domain): string
+{
+    // Allow: example.com, sub.example.com, localhost, example.test
+    // Each label: 1-63 chars, alphanumeric + hyphens, can't start/end with hyphen
+    $pattern = '/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
+
+    if (strlen($domain) > 253) {
+        throw new \InvalidArgumentException(
+            "Invalid domain: '{$domain}'. Domain name too long (max 253 characters)"
+        );
+    }
+
+    return validateShellInput($domain, 'domain', $pattern);
+}
+
+/**
+ * Validate database name format.
+ *
+ * @param string $name The database name to validate
+ * @return string The validated database name
+ * @throws \InvalidArgumentException If validation fails
+ */
+function validateDbName(string $name): string
+{
+    // PostgreSQL/MySQL identifiers: alphanumeric + underscore, start with letter/underscore
+    // Max 63 chars for PostgreSQL, 64 for MySQL - use 63 for safety
+    $pattern = '/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/';
+
+    return validateShellInput($name, 'database name', $pattern);
+}
+
+/**
+ * Validate username format.
+ *
+ * @param string $username The username to validate
+ * @return string The validated username
+ * @throws \InvalidArgumentException If validation fails
+ */
+function validateUsername(string $username): string
+{
+    // Unix username: start with lowercase letter or underscore, then lowercase alphanumeric, underscore, or hyphen
+    // Max 32 chars
+    $pattern = '/^[a-z_][a-z0-9_-]{0,31}$/';
+
+    return validateShellInput($username, 'username', $pattern);
+}
+
+/**
+ * Validate deploy path format.
+ *
+ * @param string $path The path to validate
+ * @return string The validated path
+ * @throws \InvalidArgumentException If validation fails
+ */
+function validateDeployPath(string $path): string
+{
+    // Allow: /home/deployer/myapp, ~/myapp, /var/www/myapp
+    // Alphanumeric, underscore, hyphen, slash, tilde, dot
+    // Must start with / or ~
+    $pattern = '/^[~\/][a-zA-Z0-9._\/-]+$/';
+
+    // Security: prevent path traversal
+    if (preg_match('/\.\./', $path)) {
+        throw new \InvalidArgumentException(
+            "Invalid deploy path: '{$path}'. Path traversal (..) is not allowed"
+        );
+    }
+
+    return validateShellInput($path, 'deploy path', $pattern);
 }

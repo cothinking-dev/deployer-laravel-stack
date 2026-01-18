@@ -6,76 +6,141 @@ set('bootstrap_user', 'deployer');
 
 // Specific sudo commands allowed for the deployer user
 // This is more secure than NOPASSWD:ALL
+// SECURITY: Wildcards are restricted to specific paths to prevent privilege escalation
 set('sudo_allowed_commands', [
-    // PHP-FPM management
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - PHP-FPM
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/bin/systemctl restart php*-fpm',
     '/usr/bin/systemctl reload php*-fpm',
     '/usr/bin/systemctl start php*-fpm',
     '/usr/bin/systemctl stop php*-fpm',
     '/usr/bin/systemctl status php*-fpm',
 
-    // Caddy management
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - Caddy
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/bin/systemctl restart caddy',
     '/usr/bin/systemctl reload caddy',
     '/usr/bin/systemctl start caddy',
     '/usr/bin/systemctl stop caddy',
     '/usr/bin/systemctl status caddy',
-    '/usr/bin/caddy *',
+    '/usr/bin/caddy reload --config /etc/caddy/Caddyfile',
+    '/usr/bin/caddy validate --config /etc/caddy/Caddyfile',
+    '/usr/bin/caddy fmt --overwrite /etc/caddy/Caddyfile',
+    '/usr/bin/caddy fmt --overwrite /etc/caddy/sites-enabled/*.conf',
 
-    // PostgreSQL management
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - PostgreSQL
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/bin/systemctl restart postgresql',
     '/usr/bin/systemctl reload postgresql',
     '/usr/bin/systemctl status postgresql',
 
-    // Redis management
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - MySQL
+    // ─────────────────────────────────────────────────────────────────────
+    '/usr/bin/systemctl restart mysql',
+    '/usr/bin/systemctl reload mysql',
+    '/usr/bin/systemctl status mysql',
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - Redis
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/bin/systemctl restart redis-server',
     '/usr/bin/systemctl reload redis-server',
     '/usr/bin/systemctl status redis-server',
 
-    // Fail2ban management
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - Fail2ban
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/bin/systemctl restart fail2ban',
     '/usr/bin/systemctl status fail2ban',
-    '/usr/bin/fail2ban-client *',
+    '/usr/bin/fail2ban-client status',
+    '/usr/bin/fail2ban-client status sshd',
 
-    // Supervisor management (for queue workers)
-    '/usr/bin/supervisorctl *',
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - FrankenPHP/Octane
+    // ─────────────────────────────────────────────────────────────────────
+    '/usr/bin/systemctl restart frankenphp',
+    '/usr/bin/systemctl reload frankenphp',
+    '/usr/bin/systemctl status frankenphp',
 
-    // Package management (for provisioning)
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - Supervisor
+    // ─────────────────────────────────────────────────────────────────────
+    '/usr/bin/supervisorctl reread',
+    '/usr/bin/supervisorctl update',
+    '/usr/bin/supervisorctl restart *',
+    '/usr/bin/supervisorctl status *',
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Service Management - General
+    // ─────────────────────────────────────────────────────────────────────
+    '/usr/bin/systemctl enable *',
+    '/usr/bin/systemctl disable *',
+    '/usr/bin/systemctl daemon-reload',
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Package Management (necessary for provisioning)
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/bin/apt-get update',
     '/usr/bin/apt-get install *',
     '/usr/bin/add-apt-repository *',
+    '/usr/bin/gpg --dearmor -o /usr/share/keyrings/*',
 
-    // Firewall management
+    // ─────────────────────────────────────────────────────────────────────
+    // Firewall (scoped to ufw)
+    // ─────────────────────────────────────────────────────────────────────
     '/usr/sbin/ufw *',
 
-    // File operations for deployment
-    '/bin/chown *',
-    '/bin/chmod *',
-    '/bin/mkdir *',
-    '/bin/mv /tmp/* /etc/caddy/*',
-    '/bin/mv /tmp/* /etc/fail2ban/*',
-    '/bin/mv * /usr/local/bin/*',
-    '/usr/bin/touch /var/log/caddy/*',
-    '/usr/bin/tee *',
+    // ─────────────────────────────────────────────────────────────────────
+    // File Operations - RESTRICTED PATHS ONLY
+    // ─────────────────────────────────────────────────────────────────────
 
-    // GPG for package signing
-    '/usr/bin/gpg *',
+    // Caddy configuration
+    '/bin/mv /tmp/Caddyfile /etc/caddy/Caddyfile',
+    '/bin/mv /tmp/caddy-* /etc/caddy/',
+    '/bin/mv /tmp/caddy-*.conf /etc/caddy/sites-enabled/',
+    '/usr/bin/tee /etc/caddy/Caddyfile',
+    '/usr/bin/tee /etc/caddy/sites-enabled/*.conf',
+    '/usr/bin/touch /var/log/caddy/*.log',
+    '/bin/mkdir -p /etc/caddy/sites-enabled',
+    '/bin/mkdir -p /var/log/caddy',
+    '/bin/chown -R caddy:caddy /var/log/caddy',
+    '/bin/chmod 755 /var/log/caddy',
 
-    // Bash for scripts
-    '/bin/bash /tmp/*.sh',
+    // Fail2ban configuration
+    '/bin/mv /tmp/jail.local /etc/fail2ban/jail.local',
+    '/bin/mv /tmp/fail2ban-* /etc/fail2ban/',
+    '/usr/bin/tee /etc/fail2ban/jail.local',
 
-    // Sed for config modifications
-    '/bin/sed *',
+    // Supervisor configuration
+    '/usr/bin/tee /etc/supervisor/conf.d/*.conf',
 
-    // Find for locating config files
-    '/usr/bin/find *',
+    // Systemd service files
+    '/usr/bin/tee /etc/systemd/system/frankenphp.service',
 
-    // Cat for reading system files
-    '/bin/cat /etc/*',
+    // PHP-FPM configuration
+    '/usr/bin/tee /etc/php/*/fpm/pool.d/*.conf',
+    '/bin/sed -i * /etc/php/*/fpm/php.ini',
 
-    // Systemctl for general service management
-    '/usr/bin/systemctl enable *',
-    '/usr/bin/systemctl disable *',
+    // Deploy path ownership (scoped to /home/deployer)
+    '/bin/chown -R deployer:deployer /home/deployer/*',
+    '/bin/chmod -R * /home/deployer/*',
+    '/bin/chmod 755 /home/deployer',
+    '/bin/mkdir -p /home/deployer/*',
+
+    // Composer binary (specific target only)
+    '/bin/mv /tmp/composer /usr/local/bin/composer',
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Read-only operations (safe)
+    // ─────────────────────────────────────────────────────────────────────
+    '/bin/cat /etc/os-release',
+    '/bin/cat /etc/php/*/fpm/php.ini',
+    '/bin/cat /etc/caddy/Caddyfile',
+    '/usr/bin/find /etc/php -name php.ini',
 ]);
 
 desc('Bootstrap server: create deployer user with SSH keys and restricted sudo (can run as root or with sudo access)');
@@ -114,28 +179,12 @@ task('provision:bootstrap', function () {
             $escapedPass = escapeshellarg($sudoPass);
             $passHash = run("printf '%s' {$escapedPass} | openssl passwd -stdin -6 2>/dev/null");
 
-            $maxRetries = 3;
-            $delay = 2;
-            $success = false;
-
-            for ($i = 0; $i < $maxRetries; $i++) {
-                try {
-                    if ($i > 0) {
-                        info("Retrying password update (attempt " . ($i + 1) . "/{$maxRetries})...");
-                        run("sleep {$delay}");
-                    }
-
-                    run("{$sudo}usermod -p '{$passHash}' {$user}");
-                    $success = true;
-                    break;
-                } catch (\Throwable $e) {
-                    if ($i === $maxRetries - 1) {
-                        warning("Failed to update password after {$maxRetries} attempts: {$e->getMessage()}");
-                        warning("Continuing without password update - ensure NOPASSWD sudo is configured");
-                    }
-                    $delay *= 2;
-                }
-            }
+            runWithRetry(
+                "{$sudo}usermod -p '{$passHash}' {$user}",
+                maxAttempts: 3,
+                delaySeconds: 2,
+                onFailure: fn() => warning("Password update failed - ensure NOPASSWD sudo is configured")
+            );
         }
 
         run("{$sudo}usermod -aG sudo {$user} 2>/dev/null || true");
