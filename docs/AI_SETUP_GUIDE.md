@@ -420,3 +420,166 @@ If the user reports issues:
 - Verify 1Password CLI is installed and signed in
 - Verify vault and item names match exactly
 - Run `op read "op://{vault}/{item}/sudo-password"` to test
+
+## Octane Configuration Guide
+
+When `web_server_mode` is set to `octane`, the following additional configuration applies.
+
+### Octane Configuration Variables
+
+```php
+// Port configuration (required for multi-app servers)
+set('octane_port', 8000);           // HTTP port for Octane
+set('octane_admin_port', 2019);     // FrankenPHP admin API port
+
+// Worker configuration
+set('octane_workers', 'auto');      // Number of workers (or 'auto')
+set('octane_max_requests', 500);    // Max requests before worker restart
+
+// Health check endpoint (Laravel 11+ uses /up by default)
+// Set to '' to disable, or '/' to check root
+set('octane_health_path', '/up');
+
+// Service name override (optional)
+// Default: octane-{domain-with-dots-as-dashes}
+set('octane_service_name', 'octane-myapp');
+```
+
+### Multi-Environment Single-Server Setup
+
+When deploying both staging and production to the same server, you MUST use different ports:
+
+```php
+// In deploy.php, configure per-environment ports
+environment('prod', [
+    'deploy_path' => '/home/deployer/myapp',
+    'domain' => 'myapp.com',
+    'octane_port' => 8000,
+    'octane_admin_port' => 2019,
+]);
+
+environment('staging', [
+    'deploy_path' => '/home/deployer/myapp-staging',
+    'domain' => 'staging.myapp.com',
+    'octane_port' => 8001,
+    'octane_admin_port' => 2020,
+]);
+```
+
+Or using dynamic configuration:
+
+```php
+set('octane_port', fn () => getStage() === 'prod' ? 8000 : 8001);
+set('octane_admin_port', fn () => getStage() === 'prod' ? 2019 : 2020);
+```
+
+### Octane Systemd Service
+
+The provisioning creates a systemd service named based on your domain:
+- Domain `myapp.com` → Service `octane-myapp-com`
+- Domain `staging.myapp.com` → Service `octane-staging-myapp-com`
+
+You can override the service name per-environment:
+
+```php
+environment('staging', [
+    // ...
+    'octane_service_name' => 'octane-myapp-staging',
+]);
+```
+
+### Sudoers Configuration
+
+The `provision:octane:sudoers` task automatically configures passwordless sudo for the deployer user to manage the Octane service. This is required for zero-downtime deployments.
+
+If you need to manually configure sudoers:
+
+```bash
+# /etc/sudoers.d/octane-myapp
+deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl start octane-myapp
+deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop octane-myapp
+deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart octane-myapp
+deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload octane-myapp
+deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl status octane-myapp
+```
+
+### Caddy Reverse Proxy for Octane
+
+When using Octane, Caddy acts as a reverse proxy. The provisioning creates a Caddyfile like:
+
+```caddyfile
+myapp.com {
+    reverse_proxy 127.0.0.1:8000
+
+    # Static files served directly by Caddy
+    @static {
+        path /build/* /favicon.ico /robots.txt
+    }
+    handle @static {
+        root * /home/deployer/myapp/current/public
+        file_server
+    }
+
+    encode gzip
+}
+```
+
+### Health Check Endpoint
+
+By default, the health check uses `/up` (Laravel 11+ default route). If your app doesn't have this route:
+
+1. **Option A**: Add the route to your Laravel app:
+   ```php
+   // routes/web.php
+   Route::get('/up', fn () => response('OK'));
+   ```
+
+2. **Option B**: Use the root URL for health checks:
+   ```php
+   set('octane_health_path', '/');
+   ```
+
+3. **Option C**: Disable health checks:
+   ```php
+   set('octane_health_path', '');
+   ```
+
+### Octane Troubleshooting
+
+#### "Port already in use"
+Another service is using the configured port. Solutions:
+1. Check what's using the port: `ss -tlnp | grep :8000`
+2. Configure a different port: `set('octane_port', 8002);`
+
+#### "Permission denied" when restarting Octane
+The deployer user lacks sudo permissions. Run:
+```bash
+./deploy/dep provision:octane:sudoers prod
+```
+
+#### "Service not found"
+The systemd service wasn't created. Run:
+```bash
+./deploy/dep octane:service prod
+```
+
+#### Workers not reloading after deploy
+Ensure `octane:reload` is in your deployment sequence:
+```php
+after('deploy:symlink', 'octane:reload');
+```
+
+### Octane Commands Reference
+
+```bash
+# Service management
+./deploy/dep octane:start prod
+./deploy/dep octane:stop prod
+./deploy/dep octane:restart prod
+./deploy/dep octane:reload prod      # Graceful reload (USR1 signal)
+
+# Diagnostics
+./deploy/dep octane:status prod      # Show service status
+./deploy/dep octane:logs prod        # Show recent logs
+./deploy/dep octane:health prod      # Check health endpoint
+```
