@@ -56,6 +56,41 @@ task('octane:service', function () {
 
     info("Creating systemd service: {$serviceName} (port: {$port}, admin: {$adminPort})");
 
+    // Build ReadWritePaths for all shared directories that need write access
+    $readWritePaths = [
+        "{$fullPath}/shared/storage",
+        '/tmp',
+    ];
+
+    // Add SQLite database directory if using SQLite
+    $dbConnection = get('db_connection', 'pgsql');
+    if ($dbConnection === 'sqlite') {
+        $readWritePaths[] = "{$fullPath}/shared/database";
+    }
+
+    // Add custom storage link directories
+    $storageLinks = get('storage_links', []);
+    foreach ($storageLinks as $sharedPath) {
+        $readWritePaths[] = "{$fullPath}/shared/{$sharedPath}";
+    }
+
+    // Add any additional shared_dirs that might need write access
+    $sharedDirs = get('shared_dirs', []);
+    foreach ($sharedDirs as $dir) {
+        // Skip storage (already included) and bootstrap/cache (part of release)
+        if (!in_array($dir, ['storage', 'bootstrap/cache'])) {
+            $path = "{$fullPath}/shared/{$dir}";
+            if (!in_array($path, $readWritePaths)) {
+                $readWritePaths[] = $path;
+            }
+        }
+    }
+
+    $readWritePathsConfig = implode("\n", array_map(
+        fn ($path) => "ReadWritePaths={$path}",
+        array_unique($readWritePaths)
+    ));
+
     $service = <<<SERVICE
 [Unit]
 Description=Laravel Octane ({$domain})
@@ -79,8 +114,7 @@ Environment="LARAVEL_OCTANE=1"
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={$fullPath}/shared/storage
-ReadWritePaths=/tmp
+{$readWritePathsConfig}
 
 [Install]
 WantedBy=multi-user.target

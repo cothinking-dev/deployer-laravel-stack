@@ -45,10 +45,10 @@ task('init', function () {
     writeln('');
 
     $database = askChoice('Database', [
-        'pgsql' => 'PostgreSQL (recommended)',
+        'sqlite' => 'SQLite (recommended, zero config)',
+        'pgsql' => 'PostgreSQL (for larger scale)',
         'mysql' => 'MySQL',
-        'sqlite' => 'SQLite',
-    ], 'pgsql');
+    ], 'sqlite');
 
     $queue = askChoice('Queue driver', [
         'redis' => 'Redis (recommended)',
@@ -184,6 +184,9 @@ task('init', function () {
         writeln('');
         writeln('  4. Provision and deploy production:');
         writeln('       ./deploy/dep setup:environment prod');
+        writeln('');
+        writeln('  5. (Optional) Migrate existing data (media, SQLite database):');
+        writeln('       ./deploy/dep data:migrate prod');
     } else {
         writeln('  1. Edit deploy/secrets.env and fill in the placeholder values');
         writeln('');
@@ -194,6 +197,9 @@ task('init', function () {
         writeln('');
         writeln('  4. Provision and deploy production:');
         writeln('       ./deploy/dep setup:environment prod');
+        writeln('');
+        writeln('  5. (Optional) Migrate existing data (media, SQLite database):');
+        writeln('       ./deploy/dep data:migrate prod');
         writeln('');
         writeln('<fg=yellow>  ⚠ Security warning: deploy/secrets.env contains sensitive data.</>');
         writeln('<fg=yellow>    Make sure it is in .gitignore and never committed.</>');
