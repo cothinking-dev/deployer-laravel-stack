@@ -399,13 +399,59 @@ curl -I https://your-domain.com         # Manual check
 ./deploy/dep provision:bootstrap server
 ```
 
+### Mixed Content / Broken Filament Forms
+
+If your Filament admin forms are broken (select, file-upload, markdown editor not working) or you see "Mixed Content" errors in the browser console:
+
+```bash
+# Check HTTPS configuration
+./deploy/dep check:https-config prod
+./deploy/dep verify:https-all prod
+```
+
+**Common causes:**
+1. Missing `URL::forceScheme('https')` in AppServiceProvider
+2. Missing TrustProxies middleware
+3. `APP_URL` uses `http://` instead of `https://`
+
+See [HTTPS & Proxy Guide](docs/HTTPS_PROXY_GUIDE.md) for detailed solutions.
+
+### Storage Files Return 404
+
+```bash
+# Check storage symlink
+./deploy/dep verify:storage-symlink prod
+./deploy/dep verify:storage-files prod
+
+# Fix if pointing to wrong location
+./deploy/dep storage:link-custom prod
+```
+
+**Cause:** `php artisan storage:link` creates a symlink to the release storage instead of shared storage. The recipe handles this automatically, but if you ran artisan manually it can break.
+
+### Filament Assets Missing
+
+```bash
+# Check assets exist
+./deploy/dep check:filament-assets prod
+
+# Generate assets locally, then redeploy
+php artisan filament:assets
+git add public/js/filament public/css/filament
+git commit -m "Add Filament assets"
+git push
+./deploy/dep deploy prod
+```
+
 ---
 
 ## Documentation
 
 - [Database Configuration](DATABASE_CONFIGURATION.md) - PostgreSQL, MySQL, SQLite setup
+- [HTTPS & Proxy Guide](docs/HTTPS_PROXY_GUIDE.md) - Fixing mixed content and Filament issues
 - [AI Setup Guide](docs/AI_SETUP_GUIDE.md) - Instructions for AI agents
 - [AI Questionnaire](docs/AI_QUESTIONNAIRE.md) - Information gathering checklist
+- [Deployment Flow](docs/DEPLOYMENT_FLOW.md) - Task execution order
 
 ---
 

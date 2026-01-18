@@ -50,6 +50,7 @@ task('deploy:preflight', function () {
     info('Running pre-flight checks...');
     writeln('');
 
+    $warnings = []; // Collect non-fatal warnings
     $stage = getStage();
     $phpVersion = get('php_version', '8.4');
     $diskThreshold = get('preflight_disk_threshold_mb', 1024);
@@ -178,6 +179,35 @@ BASH;
 
     // Local checks that can't be batched remotely
 
+    // -------------------------------------------------------------------------
+    // HTTPS/Proxy Configuration Checks (prevents mixed content errors)
+    // -------------------------------------------------------------------------
+
+    // Check URL::forceScheme in AppServiceProvider
+    $appServiceProvider = runLocally('cat app/Providers/AppServiceProvider.php 2>/dev/null || echo ""');
+    if (! str_contains($appServiceProvider, 'URL::forceScheme')) {
+        $warnings[] = "URL::forceScheme('https') not found in AppServiceProvider";
+        $warnings[] = '  -> This causes mixed content errors behind proxies (Cloudflare/Caddy)';
+    }
+
+    // Check Filament assets exist (if Filament is used)
+    if (testLocally('[ -d vendor/filament ]') || testLocally('composer show filament/filament 2>/dev/null')) {
+        if (! testLocally('[ -d public/js/filament ]')) {
+            $warnings[] = 'Filament JS assets not found. Run: php artisan filament:assets';
+            $warnings[] = '  -> Without these, admin forms will be broken';
+        }
+        if (! testLocally('[ -d public/css/filament ]')) {
+            $warnings[] = 'Filament CSS assets not found. Run: php artisan filament:assets';
+        }
+    }
+
+    // Check if local git is ahead of remote (common mistake)
+    $gitStatus = runLocally('git status -sb 2>/dev/null | head -1 || echo ""');
+    if (str_contains($gitStatus, 'ahead')) {
+        $warnings[] = 'Local git is ahead of remote - did you forget to push?';
+        $warnings[] = '  -> Deployer pulls from remote, not local files';
+    }
+
     // Validate secrets don't contain unresolved placeholders
     $secrets = has('secrets') ? get('secrets') : [];
     $unresolvedSecrets = [];
@@ -211,6 +241,15 @@ BASH;
                 ? "Connected to database {$dbName}"
                 : "Cannot connect to database {$dbName}. Check credentials and that database exists."
         );
+    }
+
+    // Report warnings (non-fatal but important)
+    if (! empty($warnings)) {
+        writeln('');
+        writeln('<fg=yellow>Warnings (non-fatal):</>');
+        foreach ($warnings as $warning) {
+            writeln("<fg=yellow>  ⚠</> {$warning}");
+        }
     }
 
     writeln('');

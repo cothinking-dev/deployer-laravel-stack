@@ -9,6 +9,7 @@ require __DIR__.'/tasks/npm.php';
 require __DIR__.'/tasks/services.php';
 require __DIR__.'/tasks/github.php';
 require __DIR__.'/tasks/verify.php';
+require __DIR__.'/tasks/https.php';
 require __DIR__.'/tasks/storage.php';
 require __DIR__.'/tasks/preflight.php';
 require __DIR__.'/tasks/rollback.php';
@@ -135,6 +136,10 @@ after('artisan:storage:link', 'storage:link-custom');
 // Verify deployment health - triggers auto-rollback on failure
 after('deploy:symlink', 'deploy:verify');
 after('deploy:symlink', 'queue:restart');
+
+// HTTPS and asset verification (runs after web server reload for accurate results)
+after('webserver:reload', 'verify:https-redirects');
+after('webserver:reload', 'verify:storage-symlink');
 
 // On failure, attempt to rollback and unlock
 fail('deploy', 'deploy:rollback-on-failure');

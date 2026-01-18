@@ -192,3 +192,9 @@ task('deploy:verify:quick', function () {
     set('verify_retries', 1);
     invoke('deploy:verify');
 });
+
+desc('Full deployment verification (health + HTTPS + assets + storage)');
+task('deploy:verify:full', function () {
+    invoke('deploy:verify');
+    invoke('verify:https-all');
+});
