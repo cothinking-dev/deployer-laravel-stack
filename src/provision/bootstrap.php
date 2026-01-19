@@ -131,6 +131,9 @@ set('sudo_allowed_commands', [
     '/bin/chmod 755 /home/deployer',
     '/bin/mkdir -p /home/deployer/*',
 
+    // ACL permissions for writable directories (used by deploy:writable)
+    '/usr/bin/setfacl *',
+
     // Composer binary (specific target only)
     '/bin/mv /tmp/composer /usr/local/bin/composer',
 
@@ -154,6 +157,11 @@ task('provision:bootstrap', function () {
 
     $user = get('bootstrap_user');
     $hostname = run('hostname');
+
+    // Install ACL package for writable directory permissions
+    info('Installing ACL package...');
+    run("{$sudo}apt-get update -qq");
+    run("{$sudo}apt-get install -y -qq acl");
 
     info("Creating user '{$user}'...");
 

@@ -42,6 +42,11 @@ set('web_server', WebServer::DEFAULT);  // 'fpm'
 // Default timeout for commands (5 minutes)
 set('default_timeout', 300);
 
+// Use ACL for writable directories - works with shared dirs owned by different users (www-data)
+// This avoids chmod permission errors on symlinked shared directories
+set('writable_mode', 'acl');
+set('writable_use_sudo', false);
+
 desc('Run all provisioning tasks (new server setup)');
 task('provision:all', [
     'provision:firewall',
