@@ -300,8 +300,3 @@ function formatBytes(int $bytes): string
 
     return round($bytes / pow(1024, $power), 2) . ' ' . $units[$power];
 }
-
-function getStage(): string
-{
-    return get('labels')['stage'] ?? currentHost()->getAlias();
-}
