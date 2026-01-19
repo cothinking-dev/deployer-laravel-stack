@@ -124,7 +124,8 @@ task('webserver:reload', function () {
     $webServer = get('web_server', WebServer::DEFAULT);
 
     if ($webServer === WebServer::OCTANE) {
-        invoke('octane:reload');
+        // Use the safe reload that checks if Octane is actually running
+        invoke('octane:reload:if-running');
     } else {
         invoke('php-fpm:restart');
     }

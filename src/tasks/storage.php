@@ -2,7 +2,12 @@
 
 namespace Deployer;
 
-set('storage_links', []);
+// Default storage links for Laravel applications
+// The 'storage' link is required for Laravel's public disk to work correctly with Deployer's shared storage
+// Add project-specific links via: add('storage_links', ['custom-media' => 'custom-media']);
+set('storage_links', [
+    'storage' => 'storage/app/public',
+]);
 
 // HTTP user for web server (www-data on Debian/Ubuntu, nginx on RHEL/CentOS)
 set('http_user', function () {

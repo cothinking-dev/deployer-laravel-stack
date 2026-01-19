@@ -79,14 +79,15 @@ task('caddy:configure', function () {
 {$tlsDirective}
     encode gzip
 
-    # Static files served directly
+    # Static files served directly with cache headers
     @static {
         file
-        path *.ico *.css *.js *.gif *.jpg *.jpeg *.png *.svg *.woff *.woff2 *.webp
+        path *.ico *.css *.js *.gif *.jpg *.jpeg *.png *.svg *.woff *.woff2 *.webp *.pdf *.ttf *.eot
     }
     handle @static {
         root * {$fullPath}/current/public
         file_server
+        header Cache-Control "public, max-age=604800, immutable"
     }
 
     # All other requests to Octane
@@ -123,6 +124,10 @@ CADDY;
 
     php_fastcgi unix//var/run/php/php{$phpVersion}-fpm.sock
     file_server
+
+    # Cache static assets (7 days) - great for CDN caching
+    @static path *.pdf *.jpg *.jpeg *.png *.gif *.webp *.svg *.ico *.css *.js *.woff *.woff2 *.ttf *.eot
+    header @static Cache-Control "public, max-age=604800, immutable"
 
     header {
         X-Content-Type-Options "nosniff"

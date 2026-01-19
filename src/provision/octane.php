@@ -286,3 +286,18 @@ task('octane:health', function () {
         warning("If your app doesn't have a {$healthPath} route, set octane_health_path to '/' or ''");
     }
 });
+
+desc('Reload Octane if running (safe to call even if Octane is not set up)');
+task('octane:reload:if-running', function () {
+    $serviceName = getOctaneServiceName();
+
+    $status = run("systemctl is-active {$serviceName} 2>/dev/null || echo 'inactive'");
+
+    if (trim($status) === 'active') {
+        sudo("systemctl reload {$serviceName}");
+        info("Octane workers reloaded: {$serviceName}");
+    } else {
+        // Not an error - Octane might not be configured for this environment
+        info("Octane not running ({$serviceName}), skipping reload");
+    }
+});
