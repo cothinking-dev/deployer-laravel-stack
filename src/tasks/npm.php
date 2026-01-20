@@ -23,10 +23,14 @@ function getNpmLockfileHash(): string
 /**
  * Calculate hash of source files that affect build output.
  * Includes package-lock.json, vite.config.js, resources/, and tailwind config.
+ *
+ * IMPORTANT: Blade files are included because Tailwind scans them for classes.
+ * Any new Tailwind class in a Blade file will change the CSS output.
  */
 function getAssetsSourceHash(): string
 {
     // Hash key source files that affect build output
+    // Note: *.blade.php included because Tailwind purges unused classes based on template content
     $script = <<<'BASH'
 cd {{release_path}}
 {
@@ -34,7 +38,7 @@ cd {{release_path}}
     sha256sum vite.config.* 2>/dev/null
     sha256sum tailwind.config.* 2>/dev/null
     sha256sum postcss.config.* 2>/dev/null
-    find resources -type f \( -name "*.js" -o -name "*.ts" -o -name "*.vue" -o -name "*.css" -o -name "*.scss" \) -exec sha256sum {} \; 2>/dev/null
+    find resources -type f \( -name "*.js" -o -name "*.ts" -o -name "*.vue" -o -name "*.css" -o -name "*.scss" -o -name "*.blade.php" \) -exec sha256sum {} \; 2>/dev/null
 } | sort | sha256sum | cut -d" " -f1
 BASH;
 
