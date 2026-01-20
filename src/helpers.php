@@ -116,15 +116,30 @@ function requireSecrets(array $required, array $optional = []): array
 /**
  * Define an environment with sensible defaults.
  *
+ * Branch defaults:
+ * - 'prod' environment deploys from 'main' branch
+ * - 'staging' environment deploys from 'develop' branch
+ * - Other environments deploy from their environment name as branch
+ *
+ * Override by setting 'branch' in the config array.
+ *
  * @param  array<string, mixed>  $config
  */
 function environment(string $name, array $config): void
 {
+    // Default branch based on environment name
+    $defaultBranch = match ($name) {
+        'prod', 'production' => 'main',
+        'staging' => 'develop',
+        default => $name,
+    };
+
     $defaults = [
         'app_env' => $name === 'prod' ? 'production' : $name,
         'app_debug' => false,
         'log_level' => 'error',
         'tls_mode' => 'internal',
+        'branch' => $defaultBranch,
     ];
 
     $config = array_merge($defaults, $config);
@@ -137,6 +152,7 @@ function environment(string $name, array $config): void
         ->setSshMultiplexing(true)  // Enable multiplexing to reuse SSH connections (prevents UFW rate limiting)
         ->set('git_ssh_command', 'ssh -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes')
         ->set('labels', ['stage' => $name])
+        ->set('branch', $config['branch'])
         ->set('url', "https://{$config['domain']}")
         ->set('deploy_path', $config['deploy_path'])
         ->set('domain', $config['domain'])
