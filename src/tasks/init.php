@@ -72,9 +72,10 @@ task('init', function () {
     writeln('');
 
     $secretsMode = askChoice('How do you want to manage secrets?', [
-        '1password' => '1Password CLI (recommended)',
+        'github-actions' => 'GitHub Actions CI/CD (recommended for teams)',
+        '1password' => '1Password CLI (for local development)',
         'env' => 'Plain .env file (simple)',
-    ], '1password');
+    ], 'github-actions');
 
     // 1.8 Step 6: 1Password config
     $opVault = 'DevOps';
@@ -116,6 +117,9 @@ task('init', function () {
 
     if ($secretsMode === '1password') {
         $files['deploy/secrets.tpl'] = generateSecretsTpl($config);
+    } elseif ($secretsMode === 'github-actions') {
+        $files['deploy/secrets.env.example'] = generateSecretsEnvExample($config);
+        $files['.github/workflows/deploy.yml'] = generateGitHubActionsWorkflow($config);
     } else {
         $files['deploy/secrets.env'] = generateSecretsEnv($config);
     }
@@ -124,6 +128,12 @@ task('init', function () {
     if (!is_dir('deploy')) {
         mkdir('deploy', 0755, true);
         info('Created deploy/ directory');
+    }
+
+    // Create .github/workflows directory if needed (for GitHub Actions mode)
+    if ($secretsMode === 'github-actions' && !is_dir('.github/workflows')) {
+        mkdir('.github/workflows', 0755, true);
+        info('Created .github/workflows/ directory');
     }
 
     foreach ($files as $path => $content) {
@@ -165,7 +175,37 @@ task('init', function () {
     writeln('<fg=white>Next steps:</>');
     writeln('');
 
-    if ($secretsMode === '1password') {
+    if ($secretsMode === 'github-actions') {
+        writeln('  1. Bootstrap your server (one-time setup):');
+        writeln('       ./deploy/dep setup:server server');
+        writeln('');
+        writeln('  2. Generate CI/CD SSH key for GitHub Actions:');
+        writeln('       ./deploy/dep github:ci-key server');
+        writeln('');
+        writeln('  3. (Optional) Whitelist GitHub IPs in Hetzner Cloud Firewall:');
+        writeln('       ./deploy/dep hcloud:github-ips server');
+        writeln('');
+        writeln('  4. Create GitHub environments: staging, production');
+        writeln('       Repository Settings → Environments → New environment');
+        writeln('');
+        writeln('  5. Set GitHub Secrets for each environment:');
+        writeln('       gh secret set SSH_PRIVATE_KEY --env staging < /path/to/key');
+        writeln('       gh secret set SSH_PRIVATE_KEY --env production < /path/to/key');
+        writeln('       gh secret set DEPLOYER_SUDO_PASS --env staging');
+        writeln('       gh secret set DEPLOYER_SUDO_PASS --env production');
+        writeln('       gh secret set DEPLOYER_APP_KEY --env staging');
+        writeln('       gh secret set DEPLOYER_APP_KEY --env production');
+        if ($database !== 'sqlite') {
+            writeln('       gh secret set DEPLOYER_DB_PASSWORD --env staging');
+            writeln('       gh secret set DEPLOYER_DB_PASSWORD --env production');
+        }
+        writeln('');
+        writeln('  6. Push to GitHub and deployments will run automatically:');
+        writeln('       - Push to develop → Deploy to staging');
+        writeln('       - Push to main → Deploy to production');
+        writeln('');
+        writeln('  See deploy/secrets.env.example for all available secrets.');
+    } elseif ($secretsMode === '1password') {
         writeln('  1. Create a 1Password item in your "' . $opVault . '" vault named "' . $opItem . '"');
         writeln('     with these fields:');
         writeln('       - sudo-password');

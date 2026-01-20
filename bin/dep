@@ -1,6 +1,9 @@
 #!/bin/bash
 # Deployer wrapper with secrets management
-# Supports both 1Password CLI and plain .env file modes
+# Supports three secrets modes:
+#   - env-vars:   Direct environment variables (for GitHub Actions CI/CD)
+#   - 1password:  1Password CLI integration (deploy/secrets.tpl)
+#   - env-file:   Plain .env file (deploy/secrets.env)
 # Usage: dep <command> <environment>
 
 set -eo pipefail
@@ -58,12 +61,17 @@ warn() { echo -e "${YELLOW}$*${NC}"; }
 
 show_usage() {
     cat <<EOF
-Usage: dep <command> <environment>
+Usage: dep <command> <environment> [--secrets-mode=MODE]
 
 Environments:
   prod     - Production
   staging  - Staging
   server   - Bootstrap (runs as root)
+
+Secrets modes (auto-detected, or use --secrets-mode):
+  env-vars   - Use DEPLOYER_* environment variables directly (CI/CD)
+  1password  - Use 1Password CLI with deploy/secrets.tpl
+  env-file   - Use plain deploy/secrets.env file
 
 Fresh server setup:
   dep setup:server server && dep setup:environment prod
@@ -71,6 +79,9 @@ Fresh server setup:
 Regular deploys:
   dep deploy prod
   dep deploy staging
+
+CI/CD deploys (GitHub Actions):
+  DEPLOYER_APP_KEY=... DEPLOYER_SUDO_PASS=... dep deploy prod
 
 Multi-environment commands:
   dep caddy:all     - Configure Caddy for all environments
@@ -81,21 +92,66 @@ EOF
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Detect Secrets Mode
+# Priority: explicit flag > env-vars > 1password > env-file
 # ─────────────────────────────────────────────────────────────────────────────
 
 SECRETS_MODE=""
 SECRETS_FILE=""
+EXPLICIT_MODE=""
 
-if [[ -f "deploy/secrets.tpl" && -f "deploy/secrets.env" ]]; then
-    error "Both deploy/secrets.tpl and deploy/secrets.env exist.\nRemove one to resolve the conflict."
+# Check for explicit --secrets-mode flag
+for arg in "$@"; do
+    if [[ "$arg" == --secrets-mode=* ]]; then
+        EXPLICIT_MODE="${arg#--secrets-mode=}"
+    fi
+done
+
+# Function to check if required env vars are set (for CI/CD mode)
+check_env_vars_mode() {
+    # Required: at least DEPLOYER_SUDO_PASS and DEPLOYER_APP_KEY must be set
+    [[ -n "${DEPLOYER_SUDO_PASS:-}" && -n "${DEPLOYER_APP_KEY:-}" ]]
+}
+
+if [[ -n "$EXPLICIT_MODE" ]]; then
+    # Explicit mode specified
+    case "$EXPLICIT_MODE" in
+        env-vars)
+            if ! check_env_vars_mode; then
+                error "env-vars mode requires DEPLOYER_SUDO_PASS and DEPLOYER_APP_KEY environment variables."
+            fi
+            SECRETS_MODE="env-vars"
+            ;;
+        1password)
+            if [[ ! -f "deploy/secrets.tpl" ]]; then
+                error "1password mode requires deploy/secrets.tpl file."
+            fi
+            SECRETS_MODE="1password"
+            SECRETS_FILE="deploy/secrets.tpl"
+            ;;
+        env-file)
+            if [[ ! -f "deploy/secrets.env" ]]; then
+                error "env-file mode requires deploy/secrets.env file."
+            fi
+            SECRETS_MODE="env-file"
+            SECRETS_FILE="deploy/secrets.env"
+            ;;
+        *)
+            error "Unknown secrets mode: $EXPLICIT_MODE\nValid modes: env-vars, 1password, env-file"
+            ;;
+    esac
+elif check_env_vars_mode; then
+    # Auto-detect: env-vars mode (CI/CD - environment variables already set)
+    SECRETS_MODE="env-vars"
+elif [[ -f "deploy/secrets.tpl" && -f "deploy/secrets.env" ]]; then
+    error "Both deploy/secrets.tpl and deploy/secrets.env exist.\nRemove one to resolve the conflict, or use --secrets-mode flag."
 elif [[ -f "deploy/secrets.tpl" ]]; then
     SECRETS_MODE="1password"
     SECRETS_FILE="deploy/secrets.tpl"
 elif [[ -f "deploy/secrets.env" ]]; then
-    SECRETS_MODE="env"
+    SECRETS_MODE="env-file"
     SECRETS_FILE="deploy/secrets.env"
 else
-    error "No secrets file found.\nCreate deploy/secrets.tpl (for 1Password) or deploy/secrets.env (for plain .env).\nRun 'vendor/bin/dep init' to set up your project."
+    error "No secrets configuration found.\nOptions:\n  1. Set DEPLOYER_SUDO_PASS and DEPLOYER_APP_KEY env vars (CI/CD)\n  2. Create deploy/secrets.tpl (1Password)\n  3. Create deploy/secrets.env (plain file)\n\nRun 'vendor/bin/dep init' to set up your project."
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,7 +189,15 @@ fi
 [[ -f "vendor/bin/dep" ]] || error "Deployer not installed. Run: composer install"
 
 if [[ "$SECRETS_MODE" == "1password" ]]; then
-    command -v op >/dev/null 2>&1 || error "1Password CLI (op) not installed.\nInstall: brew install 1password-cli"
+    if ! command -v op >/dev/null 2>&1; then
+        warn "1Password CLI (op) not installed."
+        warn "Install: brew install 1password-cli"
+        warn ""
+        warn "Alternatives:"
+        warn "  - Set DEPLOYER_SUDO_PASS and DEPLOYER_APP_KEY env vars (CI/CD mode)"
+        warn "  - Create deploy/secrets.env (plain file mode)"
+        error "Cannot continue in 1password mode without 'op' CLI."
+    fi
 fi
 
 # GitHub CLI is optional - warn but don't fail
@@ -176,15 +240,30 @@ info "Secrets mode: $SECRETS_MODE"
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_deployer() {
-    if [[ "$SECRETS_MODE" == "1password" ]]; then
-        op run --cache=false --env-file="$SECRETS_FILE" -- vendor/bin/dep "$@"
-    else
-        # Source env file and run deployer
-        set -a
-        source "$SECRETS_FILE"
-        set +a
-        vendor/bin/dep "$@"
-    fi
+    # Filter out --secrets-mode flag from arguments
+    local filtered_args=()
+    for arg in "$@"; do
+        if [[ "$arg" != --secrets-mode=* ]]; then
+            filtered_args+=("$arg")
+        fi
+    done
+
+    case "$SECRETS_MODE" in
+        env-vars)
+            # CI/CD mode: secrets are already in environment
+            vendor/bin/dep "${filtered_args[@]}"
+            ;;
+        1password)
+            op run --cache=false --env-file="$SECRETS_FILE" -- vendor/bin/dep "${filtered_args[@]}"
+            ;;
+        env-file)
+            # Source env file and run deployer
+            set -a
+            source "$SECRETS_FILE"
+            set +a
+            vendor/bin/dep "${filtered_args[@]}"
+            ;;
+    esac
 }
 
 case "$COMMAND" in

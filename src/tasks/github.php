@@ -259,3 +259,141 @@ task('github:show-key', function () {
         warning("No deploy key found.");
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GitHub Actions CI/CD Key Management
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get the path to the CI/CD key (separate from deploy key).
+ */
+function getCiKeyPath(bool $public = false): string
+{
+    $remoteUser = get('remote_user', 'deployer');
+    $home = $remoteUser === 'root' ? '/home/deployer' : run('echo $HOME');
+    $ext = $public ? '.pub' : '';
+
+    return "{$home}/.ssh/github_actions{$ext}";
+}
+
+desc('Generate dedicated SSH key for GitHub Actions CI/CD');
+task('github:ci-key', function () {
+    $keyPath = getCiKeyPath();
+    $hostname = run('hostname');
+    $keyComment = "github-actions@{$hostname}";
+
+    // Check if key already exists
+    if (test("[ -f {$keyPath} ]")) {
+        info("CI key already exists: {$keyPath}");
+        info("Use 'github:ci-key:show' to view the public key.");
+        info("Use 'github:ci-key:revoke' to remove and regenerate.");
+
+        return;
+    }
+
+    $remoteUser = get('remote_user', 'deployer');
+    $home = $remoteUser === 'root' ? '/home/deployer' : run('echo $HOME');
+
+    // Ensure .ssh directory exists
+    run("mkdir -p {$home}/.ssh && chmod 700 {$home}/.ssh");
+
+    info("Generating CI/CD SSH key for GitHub Actions...");
+
+    // Generate Ed25519 key
+    run("ssh-keygen -t ed25519 -N '' -f {$keyPath} -C '{$keyComment}'");
+
+    // Set correct permissions
+    run("chmod 600 {$keyPath}");
+    run("chmod 644 {$keyPath}.pub");
+
+    // Add public key to authorized_keys
+    $pubKey = run("cat {$keyPath}.pub");
+    $authorizedKeys = "{$home}/.ssh/authorized_keys";
+
+    // Check if already in authorized_keys
+    $alreadyAuthorized = test("grep -q '{$keyComment}' {$authorizedKeys} 2>/dev/null");
+
+    if (! $alreadyAuthorized) {
+        run("echo '{$pubKey}' >> {$authorizedKeys}");
+        run("chmod 600 {$authorizedKeys}");
+        info("Public key added to authorized_keys");
+    }
+
+    writeln('');
+    writeln('╔═══════════════════════════════════════════════════════════════════════╗');
+    writeln('║                    CI/CD KEY GENERATED SUCCESSFULLY                   ║');
+    writeln('╚═══════════════════════════════════════════════════════════════════════╝');
+    writeln('');
+    writeln('IMPORTANT: Copy the private key below to GitHub Secrets.');
+    writeln('This is the ONLY time the private key will be displayed.');
+    writeln('');
+    writeln('GitHub Secret name: SSH_PRIVATE_KEY');
+    writeln('');
+    writeln('─── PRIVATE KEY (copy everything including BEGIN/END lines) ────────────');
+    writeln('');
+    writeln(run("cat {$keyPath}"));
+    writeln('');
+    writeln('─────────────────────────────────────────────────────────────────────────');
+    writeln('');
+    writeln('Set the secret in GitHub:');
+    writeln('  gh secret set SSH_PRIVATE_KEY --env staging < /path/to/saved/key');
+    writeln('  gh secret set SSH_PRIVATE_KEY --env production < /path/to/saved/key');
+    writeln('');
+    writeln('Or via GitHub web UI:');
+    writeln('  Repository Settings → Secrets and variables → Actions → Environments');
+    writeln('');
+})->once();
+
+desc('Show the CI/CD public key');
+task('github:ci-key:show', function () {
+    $keyPath = getCiKeyPath(public: true);
+
+    if (! test("[ -f {$keyPath} ]")) {
+        warning("No CI key found. Run 'github:ci-key' to generate one.");
+
+        return;
+    }
+
+    info("CI/CD Public Key ({$keyPath}):");
+    writeln('');
+    writeln(run("cat {$keyPath}"));
+    writeln('');
+    info("This key is in the server's authorized_keys file.");
+})->once();
+
+desc('Revoke the CI/CD SSH key');
+task('github:ci-key:revoke', function () {
+    $keyPath = getCiKeyPath();
+    $pubKeyPath = getCiKeyPath(public: true);
+
+    if (! test("[ -f {$keyPath} ]")) {
+        warning("No CI key found at {$keyPath}");
+
+        return;
+    }
+
+    $remoteUser = get('remote_user', 'deployer');
+    $home = $remoteUser === 'root' ? '/home/deployer' : run('echo $HOME');
+    $authorizedKeys = "{$home}/.ssh/authorized_keys";
+
+    // Get the key comment to find it in authorized_keys
+    $pubKey = trim(run("cat {$pubKeyPath}"));
+
+    // Remove from authorized_keys
+    if (test("[ -f {$authorizedKeys} ]")) {
+        // Create a temp file without the CI key
+        run("grep -v 'github-actions@' {$authorizedKeys} > {$authorizedKeys}.tmp || true");
+        run("mv {$authorizedKeys}.tmp {$authorizedKeys}");
+        run("chmod 600 {$authorizedKeys}");
+        info("Removed CI key from authorized_keys");
+    }
+
+    // Remove the key files
+    run("rm -f {$keyPath} {$pubKeyPath}");
+    info("Removed CI key files");
+
+    writeln('');
+    info("CI/CD key has been revoked.");
+    info("Remember to remove the secret from GitHub Secrets as well.");
+    writeln('');
+})->once();
