@@ -369,6 +369,103 @@ Deploy keys are project-specific (GitHub requires unique keys per repo):
 
 ---
 
+## GitHub Actions CI/CD
+
+Deploy automatically via GitHub Actions instead of manual `./deploy/dep` commands.
+
+### Setup
+
+1. **Generate CI/CD SSH key on server:**
+
+   ```bash
+   ./deploy/dep github:ci-key server
+   ```
+
+   Copy the private key output (displayed once).
+
+2. **Create GitHub environments:**
+
+   Go to Repository Settings → Environments → New environment
+   - Create `staging` environment
+   - Create `production` environment (optionally add protection rules)
+
+3. **Set secrets for each environment:**
+
+   ```bash
+   # SSH key (from github:ci-key output)
+   gh secret set SSH_PRIVATE_KEY --env staging < /path/to/key
+   gh secret set SSH_PRIVATE_KEY --env production < /path/to/key
+
+   # Required secrets
+   gh secret set DEPLOYER_SUDO_PASS --env staging
+   gh secret set DEPLOYER_SUDO_PASS --env production
+   gh secret set DEPLOYER_APP_KEY --env staging    # Different key per env!
+   gh secret set DEPLOYER_APP_KEY --env production
+
+   # Database password (if not using SQLite)
+   gh secret set DEPLOYER_DB_PASSWORD --env staging
+   gh secret set DEPLOYER_DB_PASSWORD --env production
+   ```
+
+4. **Copy workflow file:**
+
+   ```bash
+   mkdir -p .github/workflows
+   cp vendor/cothinking-dev/deployer-laravel-stack/examples/.github/workflows/deploy.yml .github/workflows/
+   ```
+
+5. **Push and deploy:**
+
+   ```bash
+   git add .github/workflows/deploy.yml
+   git commit -m "Add GitHub Actions CI/CD"
+   git push origin main  # Triggers production deploy
+   ```
+
+### Branch Workflow
+
+| Branch | Deploys To |
+|--------|------------|
+| `main` | Production |
+| `develop` | Staging |
+| Manual trigger | Choose environment |
+
+### Manual Trigger
+
+```bash
+# Via GitHub CLI
+gh workflow run deploy -f environment=staging
+gh workflow run deploy -f environment=production
+
+# Or via GitHub web UI: Actions → Deploy → Run workflow
+```
+
+### Hetzner Cloud Firewall (Optional)
+
+If using Hetzner Cloud, whitelist GitHub Actions IP ranges:
+
+```bash
+# Requires: hcloud CLI installed and configured
+./deploy/dep hcloud:github-ips server
+
+# Refresh IPs periodically (GitHub IPs change)
+./deploy/dep hcloud:github-ips:refresh server
+```
+
+### Secrets Modes
+
+The `bin/dep` wrapper auto-detects secrets mode:
+
+| Mode | When Used | Configuration |
+|------|-----------|---------------|
+| `env-vars` | CI/CD | `DEPLOYER_*` env vars set directly |
+| `1password` | Local dev | `deploy/secrets.tpl` exists |
+| `env-file` | Handover | `deploy/secrets.env` exists |
+
+Override with `--secrets-mode=MODE` flag.
+
+---
+
 ## Troubleshooting
 
 ### Deploy key not working

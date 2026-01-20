@@ -1,0 +1,191 @@
+# GitHub Actions CI/CD workflow for Laravel with deployer-laravel-stack
+#
+# Branch workflow:
+#   - Push to 'main'    -> Deploy to production (requires approval)
+#   - Push to 'develop' -> Deploy to staging (automatic)
+#   - Manual trigger    -> Choose environment via workflow_dispatch
+#
+# Required GitHub Secrets (per environment):
+#   - SSH_PRIVATE_KEY: Private key from `dep github:ci-key server`
+#   - DEPLOYER_SUDO_PASS: Server sudo password
+#   - DEPLOYER_APP_KEY: Laravel APP_KEY (different per environment!)
+#   - DEPLOYER_DB_PASSWORD: Database password
+#
+# Optional secrets:
+#   - DEPLOYER_MAILGUN_SECRET
+#   - DEPLOYER_LOOPS_API_KEY
+#   - DEPLOYER_TURNSTILE_SECRET
+#
+# Setup:
+#   1. Create GitHub environments: staging, production
+#   2. Set secrets for each environment
+#   3. Configure production protection rules (optional)
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+# Prevent concurrent deploys to the same environment
+concurrency:
+  group: deploy-${{ github.ref_name == 'main' && 'production' || github.ref_name == 'develop' && 'staging' || github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Test Job - Required before deployment
+  # ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv
+          coverage: none
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Install NPM dependencies
+        run: npm ci
+
+      - name: Build assets
+        run: npm run build
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Create test database
+        run: |
+          mkdir -p database
+          touch database/database.sqlite
+
+      - name: Run Laravel Pint
+        run: vendor/bin/pint --test
+
+      - name: Run Larastan (if configured)
+        run: |
+          if [ -f phpstan.neon ] || [ -f phpstan.neon.dist ]; then
+            vendor/bin/phpstan analyse --memory-limit=2G
+          else
+            echo "Skipping Larastan - no phpstan.neon found"
+          fi
+
+      - name: Run PHPUnit tests
+        run: php artisan test
+        env:
+          DB_CONNECTION: sqlite
+          DB_DATABASE: database/database.sqlite
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Deploy to Staging
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Deploy to staging
+        uses: deployphp/action@v1
+        with:
+          private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          dep: deploy staging -v
+        env:
+          DEPLOYER_SUDO_PASS: ${{ secrets.DEPLOYER_SUDO_PASS }}
+          DEPLOYER_APP_KEY: ${{ secrets.DEPLOYER_APP_KEY }}
+          DEPLOYER_DB_PASSWORD: ${{ secrets.DEPLOYER_DB_PASSWORD }}
+          DEPLOYER_MAILGUN_SECRET: ${{ secrets.DEPLOYER_MAILGUN_SECRET }}
+          DEPLOYER_LOOPS_API_KEY: ${{ secrets.DEPLOYER_LOOPS_API_KEY }}
+          DEPLOYER_TURNSTILE_SECRET: ${{ secrets.DEPLOYER_TURNSTILE_SECRET }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Deploy to Production
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Deploy to production
+        uses: deployphp/action@v1
+        with:
+          private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          dep: deploy prod -v
+        env:
+          DEPLOYER_SUDO_PASS: ${{ secrets.DEPLOYER_SUDO_PASS }}
+          DEPLOYER_APP_KEY: ${{ secrets.DEPLOYER_APP_KEY }}
+          DEPLOYER_DB_PASSWORD: ${{ secrets.DEPLOYER_DB_PASSWORD }}
+          DEPLOYER_MAILGUN_SECRET: ${{ secrets.DEPLOYER_MAILGUN_SECRET }}
+          DEPLOYER_LOOPS_API_KEY: ${{ secrets.DEPLOYER_LOOPS_API_KEY }}
+          DEPLOYER_TURNSTILE_SECRET: ${{ secrets.DEPLOYER_TURNSTILE_SECRET }}

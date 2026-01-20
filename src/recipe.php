@@ -8,6 +8,7 @@ require_once __DIR__.'/tasks/env.php';
 require __DIR__.'/tasks/npm.php';
 require __DIR__.'/tasks/services.php';
 require __DIR__.'/tasks/github.php';
+require __DIR__.'/tasks/hcloud.php';
 require __DIR__.'/tasks/verify.php';
 require __DIR__.'/tasks/https.php';
 require __DIR__.'/tasks/storage.php';
